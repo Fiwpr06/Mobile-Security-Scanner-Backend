@@ -1,0 +1,48 @@
+{
+  "appender": [
+    {
+      "name": "CONSOLE",
+      "class": "ch.qos.logback.core.ConsoleAppender",
+      "encoder": {
+        "class": "net.logstash.logback.encoder.LogstashEncoder",
+        "includeContext": true,
+        "customFields": "{\"app\":\"mobile-security-scanner\",\"version\":\"1.0.0\"}"
+      }
+    },
+    {
+      "name": "FILE",
+      "class": "ch.qos.logback.core.rolling.RollingFileAppender",
+      "file": "logs/application.log",
+      "rollingPolicy": {
+        "class": "ch.qos.logback.core.rolling.TimeBasedRollingPolicy",
+        "fileNamePattern": "logs/application.%d{yyyy-MM-dd}.%i.log.gz",
+        "maxHistory": 30,
+        "timeBasedFileNamingAndTriggeringPolicy": {
+          "class": "ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP",
+          "maxFileSize": "100MB"
+        }
+      },
+      "encoder": {
+        "class": "net.logstash.logback.encoder.LogstashEncoder",
+        "includeContext": true
+      }
+    }
+  ],
+  "root": {
+    "level": "INFO",
+    "appender-ref": [
+      { "ref": "CONSOLE" },
+      { "ref": "FILE" }
+    ]
+  },
+  "logger": [
+    {
+      "name": "com.security.scanner",
+      "level": "DEBUG"
+    },
+    {
+      "name": "org.springframework.security",
+      "level": "WARN"
+    }
+  ]
+}
