@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Scanner Testing</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --bg-card: rgba(30, 41, 59, 0.7);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15) 0%, transparent 50%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.6);
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            background: linear-gradient(to right, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            color: var(--text-main);
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        button {
+            width: 100%;
+            padding: 0.75rem 1.5rem;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background-color: #475569;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border);
+            font-family: monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+            display: none;
+        }
+
+        .token-display {
+            font-size: 0.75rem;
+            color: var(--success);
+            margin-top: 0.5rem;
+            word-break: break-all;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+
+        .status-safe { background-color: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .status-suspicious { background-color: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .status-dangerous { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        
+        /* Spinner */
+        .loader {
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Auth Section -->
+        <div class="card" id="authCard">
+            <h2>1. Device Registration</h2>
+            <div class="form-group">
+                <label for="deviceId">Device ID (Min 8 chars)</label>
+                <input type="text" id="deviceId" value="test-web-device-001" placeholder="Enter device ID">
+            </div>
+            <button id="registerBtn" onclick="registerDevice()">
+                <div class="loader" id="registerLoader"></div>
+                Register & Get Token
+            </button>
+            <div id="tokenDisplay" class="token-display"></div>
+            <div id="authResult" class="result"></div>
+        </div>
+
+        <!-- Scan Section -->
+        <div class="card" id="scanCard" style="opacity: 0.5; pointer-events: none;">
+            <h2>2. URL Scanner</h2>
+            <div class="form-group">
+                <label for="urlToScan">URL to scan</label>
+                <input type="text" id="urlToScan" placeholder="https://example.com">
+            </div>
+            <button id="scanBtn" onclick="scanUrl()">
+                <div class="loader" id="scanLoader"></div>
+                Scan URL
+            </button>
+            <div id="scanResult" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080/api/v1';
+        let jwtToken = null;
+
+        async function registerDevice() {
+            const deviceId = document.getElementById('deviceId').value;
+            const btn = document.getElementById('registerBtn');
+            const loader = document.getElementById('registerLoader');
+            const resultDiv = document.getElementById('authResult');
+            const tokenDisplay = document.getElementById('tokenDisplay');
+
+            if (deviceId.length < 8) {
+                alert("Device ID must be at least 8 characters");
+                return;
+            }
+
+            btn.disabled = true;
+            loader.style.display = 'block';
+            resultDiv.style.display = 'none';
+            tokenDisplay.textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        deviceId: deviceId,
+                        platform: 'web-test',
+                        appVersion: '1.0.0'
+                    })
+                });
+
+                const data = await response.json();
+                
+                resultDiv.style.display = 'block';
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+
+                if (response.ok && data.data && data.data.accessToken) {
+                    jwtToken = data.data.accessToken;
+                    tokenDisplay.textContent = `Token Acquired: ${jwtToken.substring(0, 20)}...`;
+                    resultDiv.style.borderColor = 'var(--success)';
+                    
+                    // Enable Scan section
+                    const scanCard = document.getElementById('scanCard');
+                    scanCard.style.opacity = '1';
+                    scanCard.style.pointerEvents = 'auto';
+                } else {
+                    resultDiv.style.borderColor = 'var(--danger)';
+                }
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.borderColor = 'var(--danger)';
+                resultDiv.textContent = `Error: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+
+        async function scanUrl() {
+            if (!jwtToken) {
+                alert("Please register first to get a token");
+                return;
+            }
+
+            const url = document.getElementById('urlToScan').value;
+            const btn = document.getElementById('scanBtn');
+            const loader = document.getElementById('scanLoader');
+            const resultDiv = document.getElementById('scanResult');
+
+            if (!url) {
+                alert("Please enter a URL to scan");
+                return;
+            }
+
+            btn.disabled = true;
+            loader.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/scan`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${jwtToken}`
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+                
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = formatScanResult(data);
+                
+                if (response.ok) {
+                    resultDiv.style.borderColor = 'var(--success)';
+                } else {
+                    resultDiv.style.borderColor = 'var(--danger)';
+                }
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.borderColor = 'var(--danger)';
+                resultDiv.textContent = `Error: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+
+        function formatScanResult(data) {
+            if (!data.success || !data.data) {
+                return JSON.stringify(data, null, 2);
+            }
+
+            const scan = data.data;
+            const statusClass = scan.status.toLowerCase();
+            
+            let html = `<div class="status-badge status-${statusClass}">STATUS: ${scan.status}</div>\n`;
+            html += `<b>Risk Score:</b> ${scan.riskScore}/100\n`;
+            html += `<b>URL:</b> ${scan.url}\n\n`;
+            html += `<b>Sources Data:</b>\n${JSON.stringify(scan.sources, null, 2)}`;
+            
+            return html;
+        }
+    </script>
+</body>
+</html>
