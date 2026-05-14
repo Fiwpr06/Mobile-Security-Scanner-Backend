@@ -75,6 +75,9 @@ dependencies {
     // Apache HTTP Client (for WebClient)
     implementation("org.apache.httpcomponents.client5:httpclient5:5.3.1")
 
+    // Guava (for BloomFilter)
+    implementation("com.google.guava:guava:33.0.0-jre")
+
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.projectreactor:reactor-test")
