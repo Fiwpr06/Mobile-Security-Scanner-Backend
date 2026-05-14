@@ -9,17 +9,36 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.util.Optional
-import java.util.UUID
 
 @Repository
-interface MaliciousUrlRepository : JpaRepository<MaliciousUrl, UUID> {
+interface MaliciousUrlRepository : JpaRepository<MaliciousUrl, String> {
     fun findByUrlHash(urlHash: String): Optional<MaliciousUrl>
     fun existsByUrlHash(urlHash: String): Boolean
 
-    @Query("SELECT m FROM MaliciousUrl m ORDER BY m.detectionCount DESC")
+    @Query("SELECT m FROM MaliciousUrl m WHERE m.isDangerous = true ORDER BY m.confidenceScore DESC, m.detectionCount DESC")
     fun findTopThreats(pageable: Pageable): Page<MaliciousUrl>
 
     @Modifying
     @Query("UPDATE MaliciousUrl m SET m.detectionCount = m.detectionCount + 1, m.lastDetectedAt = :now WHERE m.urlHash = :urlHash")
     fun incrementDetectionCount(urlHash: String, now: Instant)
+
+    @Modifying
+    @Query(value = """
+        INSERT INTO malicious_urls (
+            url_hash, url, normalized_domain, normalized_path, threat_category, 
+            is_dangerous, confidence_score, detection_count, first_detected_at, 
+            last_detected_at, sources
+        ) VALUES (
+            :#{#m.urlHash}, :#{#m.url}, :#{#m.normalizedDomain}, :#{#m.normalizedPath}, :#{#m.threatCategory},
+            :#{#m.isDangerous}, :#{#m.confidenceScore}, :#{#m.detectionCount}, :#{#m.firstDetectedAt},
+            :#{#m.lastDetectedAt}, :#{#m.sources}
+        ) ON CONFLICT (url_hash) DO UPDATE SET 
+            threat_category = CASE WHEN EXCLUDED.confidence_score > malicious_urls.confidence_score THEN EXCLUDED.threat_category ELSE malicious_urls.threat_category END,
+            is_dangerous = CASE WHEN EXCLUDED.confidence_score > malicious_urls.confidence_score THEN EXCLUDED.is_dangerous ELSE malicious_urls.is_dangerous END,
+            confidence_score = GREATEST(malicious_urls.confidence_score, EXCLUDED.confidence_score),
+            detection_count = malicious_urls.detection_count + EXCLUDED.detection_count,
+            last_detected_at = GREATEST(malicious_urls.last_detected_at, EXCLUDED.last_detected_at),
+            sources = malicious_urls.sources || ',' || EXCLUDED.sources
+    """, nativeQuery = true)
+    fun upsertMaliciousUrl(m: MaliciousUrl)
 }
