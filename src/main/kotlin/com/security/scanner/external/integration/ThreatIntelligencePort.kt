@@ -14,11 +14,19 @@ interface ThreatIntelligencePort {
     suspend fun analyze(url: String): ThreatAnalysisResult
 }
 
+enum class ThreatIntelStatus {
+    SUCCESS,
+    UNKNOWN,
+    TIMEOUT,
+    RATE_LIMITED,
+    FAILED
+}
+
 data class ThreatAnalysisResult(
     val sourceName: String,
     val riskScore: Double,  // 0.0 - 100.0
     val isMalicious: Boolean,
     val rawData: Any?,
     val error: String? = null,
-    val success: Boolean = true
+    val status: ThreatIntelStatus = ThreatIntelStatus.SUCCESS
 )
