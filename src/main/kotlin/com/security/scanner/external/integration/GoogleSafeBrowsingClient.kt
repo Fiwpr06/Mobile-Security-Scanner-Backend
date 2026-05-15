@@ -41,7 +41,7 @@ class GoogleSafeBrowsingClient(
                 isMalicious = false,
                 rawData = GoogleSafeBrowsingResult(flagged = false),
                 error = "Service disabled",
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
 
@@ -70,18 +70,31 @@ class GoogleSafeBrowsingClient(
                 sourceName = sourceName,
                 riskScore = if (isMalicious) 100.0 else 0.0,
                 isMalicious = isMalicious,
-                rawData = rawData
+                rawData = rawData,
+                status = ThreatIntelStatus.SUCCESS
             )
         } catch (e: WebClientResponseException) {
-            log.error("Google Safe Browsing API error: status=${e.statusCode}, body=${e.responseBodyAsString}", e)
-            ThreatAnalysisResult(
-                sourceName = sourceName,
-                riskScore = 0.0,
-                isMalicious = false,
-                rawData = null,
-                error = "API error: ${e.statusCode}",
-                success = false
-            )
+            if (e.statusCode.value() == 429) {
+                log.warn("Google Safe Browsing API rate limited: $url")
+                ThreatAnalysisResult(
+                    sourceName = sourceName,
+                    riskScore = 0.0,
+                    isMalicious = false,
+                    rawData = null,
+                    error = "API rate limited",
+                    status = ThreatIntelStatus.RATE_LIMITED
+                )
+            } else {
+                log.error("Google Safe Browsing API error: status=${e.statusCode}, body=${e.responseBodyAsString}", e)
+                ThreatAnalysisResult(
+                    sourceName = sourceName,
+                    riskScore = 0.0,
+                    isMalicious = false,
+                    rawData = null,
+                    error = "API error: ${e.statusCode}",
+                    status = ThreatIntelStatus.FAILED
+                )
+            }
         } catch (e: Exception) {
             log.error("Google Safe Browsing unexpected error for url=$url", e)
             ThreatAnalysisResult(
@@ -90,7 +103,7 @@ class GoogleSafeBrowsingClient(
                 isMalicious = false,
                 rawData = null,
                 error = e.message,
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
     }
@@ -104,7 +117,7 @@ class GoogleSafeBrowsingClient(
             isMalicious = false,
             rawData = null,
             error = "Service unavailable (circuit open)",
-            success = false
+            status = ThreatIntelStatus.TIMEOUT
         )
     }
 
