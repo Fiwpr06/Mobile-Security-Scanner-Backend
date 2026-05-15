@@ -46,7 +46,7 @@ class AbuseIpDbClient(
                 isMalicious = false,
                 rawData = AbuseIpDbResult(),
                 error = "Service disabled",
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
 
@@ -58,7 +58,7 @@ class AbuseIpDbClient(
                 isMalicious = false,
                 rawData = AbuseIpDbResult(),
                 error = "Could not extract or resolve IP from URL",
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
 
             val response = webClient.get()
@@ -91,18 +91,31 @@ class AbuseIpDbClient(
                 sourceName = sourceName,
                 riskScore = confidenceScore.toDouble(),
                 isMalicious = isMalicious,
-                rawData = rawData
+                rawData = rawData,
+                status = ThreatIntelStatus.SUCCESS
             )
         } catch (e: WebClientResponseException) {
-            log.error("AbuseIPDB API error: status=${e.statusCode}", e)
-            ThreatAnalysisResult(
-                sourceName = sourceName,
-                riskScore = 0.0,
-                isMalicious = false,
-                rawData = null,
-                error = "API error: ${e.statusCode}",
-                success = false
-            )
+            if (e.statusCode.value() == 429) {
+                log.warn("AbuseIPDB API rate limited: $url")
+                ThreatAnalysisResult(
+                    sourceName = sourceName,
+                    riskScore = 0.0,
+                    isMalicious = false,
+                    rawData = null,
+                    error = "API rate limited",
+                    status = ThreatIntelStatus.RATE_LIMITED
+                )
+            } else {
+                log.error("AbuseIPDB API error: status=${e.statusCode}", e)
+                ThreatAnalysisResult(
+                    sourceName = sourceName,
+                    riskScore = 0.0,
+                    isMalicious = false,
+                    rawData = null,
+                    error = "API error: ${e.statusCode}",
+                    status = ThreatIntelStatus.FAILED
+                )
+            }
         } catch (e: Exception) {
             log.error("AbuseIPDB unexpected error for url=$url", e)
             ThreatAnalysisResult(
@@ -111,7 +124,7 @@ class AbuseIpDbClient(
                 isMalicious = false,
                 rawData = null,
                 error = e.message,
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
     }
@@ -125,7 +138,7 @@ class AbuseIpDbClient(
             isMalicious = false,
             rawData = null,
             error = "Service unavailable (circuit open)",
-            success = false
+            status = ThreatIntelStatus.TIMEOUT
         )
     }
 
