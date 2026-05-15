@@ -45,7 +45,7 @@ class VirusTotalClient(
                 isMalicious = false,
                 rawData = VirusTotalResult(),
                 error = "Service disabled",
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
 
@@ -85,19 +85,31 @@ class VirusTotalClient(
                 sourceName = sourceName,
                 riskScore = riskScore,
                 isMalicious = malicious > 0,
-                rawData = rawData
+                rawData = rawData,
+                status = ThreatIntelStatus.SUCCESS
             )
         } catch (e: WebClientResponseException) {
             if (e.statusCode.value() == 404) {
-                // URL not found in VirusTotal - not necessarily safe
-                log.info("URL not found in VirusTotal database: $url")
+                // BUG FIX: URL not found in VirusTotal does NOT mean it's safe (Zero-day phishing bypass)
+                // It means VirusTotal hasn't seen it yet. Status = UNKNOWN.
+                log.info("URL not found in VirusTotal database (404): $url")
                 ThreatAnalysisResult(
                     sourceName = sourceName,
                     riskScore = 0.0,
                     isMalicious = false,
                     rawData = VirusTotalResult(),
-                    error = null,
-                    success = true
+                    error = "URL_NOT_FOUND_IN_DB",
+                    status = ThreatIntelStatus.UNKNOWN
+                )
+            } else if (e.statusCode.value() == 429) {
+                log.warn("VirusTotal API rate limited: $url")
+                ThreatAnalysisResult(
+                    sourceName = sourceName,
+                    riskScore = 0.0,
+                    isMalicious = false,
+                    rawData = null,
+                    error = "API rate limited",
+                    status = ThreatIntelStatus.RATE_LIMITED
                 )
             } else {
                 log.error("VirusTotal API error: status=${e.statusCode}", e)
@@ -107,7 +119,7 @@ class VirusTotalClient(
                     isMalicious = false,
                     rawData = null,
                     error = "API error: ${e.statusCode}",
-                    success = false
+                    status = ThreatIntelStatus.FAILED
                 )
             }
         } catch (e: Exception) {
@@ -118,7 +130,7 @@ class VirusTotalClient(
                 isMalicious = false,
                 rawData = null,
                 error = e.message,
-                success = false
+                status = ThreatIntelStatus.FAILED
             )
         }
     }
@@ -132,7 +144,7 @@ class VirusTotalClient(
             isMalicious = false,
             rawData = null,
             error = "Service unavailable (circuit open)",
-            success = false
+            status = ThreatIntelStatus.TIMEOUT
         )
     }
 }
