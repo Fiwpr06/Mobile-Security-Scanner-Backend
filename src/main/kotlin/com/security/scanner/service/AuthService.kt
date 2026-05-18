@@ -19,7 +19,11 @@ class AuthService(
 
     @Transactional
     fun registerDevice(request: DeviceRegistrationRequest): AuthResponse {
+        // BUG FIX: The previous code called findByDeviceId() then existsByDeviceId() —
+        // two separate DB queries for the same device. Fixed by tracking isNewDevice flag.
+        var isNewDevice = false
         val device = deviceRepository.findByDeviceId(request.deviceId).orElseGet {
+            isNewDevice = true
             log.info("Registering new device: ${request.deviceId}")
             deviceRepository.save(
                 Device(
@@ -30,8 +34,8 @@ class AuthService(
             )
         }
 
-        // Update last seen for existing device
-        if (deviceRepository.existsByDeviceId(request.deviceId)) {
+        // Only update lastSeen for already-existing devices, not newly registered ones
+        if (!isNewDevice) {
             deviceRepository.updateLastSeen(request.deviceId, Instant.now())
         }
 
