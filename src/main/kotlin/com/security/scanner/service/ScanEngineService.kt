@@ -32,8 +32,8 @@ class ScanEngineService(
      * CRITICAL FIX: Removed @Transactional from this method.
      *
      * The previous implementation held an open DB Connection (from HikariCP) for the entire
-     * duration of the scan â€” including all external HTTP calls to Google, VirusTotal, AbuseIPDB.
-     * Each external call can take 5â€“10 seconds. With a pool of 20 connections, only 20 concurrent
+     * duration of the scan — including all external HTTP calls to Google, VirusTotal, AbuseIPDB.
+     * Each external call can take 5–10 seconds. With a pool of 20 connections, only 20 concurrent
      * scans were possible before the entire application deadlocked.
      *
      * FIX: @Transactional is now placed ONLY on saveScanResult(), which is the only method
@@ -136,7 +136,6 @@ class ScanEngineService(
         return aggregated.copy(scanTimeMs = scanTimeMs)
     }
 
-    // FEAT: Conditional VirusTotal escalation based on risk score
     private fun shouldTriggerVirusTotal(
         googleResult: ThreatAnalysisResult?,
         abuseResult: ThreatAnalysisResult?,
