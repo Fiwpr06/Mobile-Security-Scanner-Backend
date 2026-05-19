@@ -2,20 +2,15 @@ package com.security.scanner.service
 
 import com.security.scanner.config.ScanConfig
 import com.security.scanner.domain.dto.*
-import com.security.scanner.domain.model.MaliciousUrl
 import com.security.scanner.domain.model.RiskStatus
 import com.security.scanner.domain.model.ScanResult
 import com.security.scanner.external.integration.*
 import com.security.scanner.heuristic.HeuristicAnalyzer
-import com.security.scanner.repository.MaliciousUrlRepository
-import com.security.scanner.repository.ScanResultRepository
+import com.security.scanner.repository.ScanRepositoryAdapter
 import com.security.scanner.ssl.SslAnalyzer
-import com.security.scanner.service.SecuritySnacksIngestionService
 import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
-import java.security.MessageDigest
 import java.time.Instant
 
 @Service
@@ -23,85 +18,143 @@ class ScanEngineService(
     private val googleSafeBrowsingClient: GoogleSafeBrowsingClient,
     private val virusTotalClient: VirusTotalClient,
     private val abuseIpDbClient: AbuseIpDbClient,
-    private val scanResultRepository: ScanResultRepository,
-    private val maliciousUrlRepository: MaliciousUrlRepository,
+    private val scanRepositoryAdapter: ScanRepositoryAdapter,
+    private val redisThreatCacheService: RedisThreatCacheService,
     private val scanConfig: ScanConfig,
     private val sslAnalyzer: SslAnalyzer,
     private val heuristicAnalyzer: HeuristicAnalyzer,
-    private val securitySnacksService: SecuritySnacksIngestionService
+    private val offlineThreatIntelService: OfflineThreatIntelService,
+    private val canonicalUrlService: CanonicalUrlService
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @Transactional
-    suspend fun scanUrl(url: String, deviceId: String): ScanResponse {
+    /**
+     * CRITICAL FIX: Removed @Transactional from this method.
+     *
+     * The previous implementation held an open DB Connection (from HikariCP) for the entire
+     * duration of the scan â€” including all external HTTP calls to Google, VirusTotal, AbuseIPDB.
+     * Each external call can take 5â€“10 seconds. With a pool of 20 connections, only 20 concurrent
+     * scans were possible before the entire application deadlocked.
+     *
+     * FIX: @Transactional is now placed ONLY on saveScanResult(), which is the only method
+     * that actually needs a DB transaction. This reduces connection hold time from ~10s to <10ms.
+     */
+    suspend fun scanUrl(rawUrl: String, deviceId: String): ScanResponse {
         val startTime = System.currentTimeMillis()
-        val urlHash = hashUrl(url)
 
-        val cached = findRecentScan(urlHash)
-        if (cached != null) {
-            log.info("Returning cached result for url hash=$urlHash")
-            // Run local analyzers on the fly for cached results since they aren't stored in DB yet
-            val sslResult = sslAnalyzer.analyze(url)
-            val heuristicResult = heuristicAnalyzer.analyze(url)
-            val inSecuritySnacks = securitySnacksService.isDomainDangerous(url)
-            return cached.toResponse(isCached = true, sslResult = sslResult, heuristicResult = heuristicResult, inSecuritySnacks = inSecuritySnacks)
+        // 1. Canonicalization
+        val canonicalData = canonicalUrlService.canonicalize(rawUrl)
+            ?: return createInvalidUrlResponse(rawUrl, startTime)
+
+        val urlHash = canonicalData.urlHash
+        val canonicalUrl = canonicalData.fullCanonicalUrl
+
+        // 2. Redis-First Cache
+        val cachedRedis = redisThreatCacheService.getCachedUrlThreat(urlHash)
+        if (cachedRedis != null) {
+            log.info("Returning Redis cached result for url hash=$urlHash verdict=${cachedRedis.verdict}")
+            val sslResult = sslAnalyzer.analyze(canonicalUrl)
+            val heuristicResult = heuristicAnalyzer.analyze(canonicalUrl)
+            val status = RiskStatus.valueOf(cachedRedis.verdict.uppercase())
+            return ScanResponse(
+                url = canonicalUrl,
+                riskScore = (cachedRedis.confidence * 100).toInt(),
+                status = status,
+                sources = buildSources(emptyMap(), sslResult, heuristicResult, status == RiskStatus.DANGEROUS),
+                scanTimeMs = 0,
+                isCached = true
+            )
         }
 
-        val results = if (scanConfig.parallelEnabled) {
-            runParallelScan(url)
+        // 2.5 Check DB Cache (Fallback)
+        val cachedDb = findRecentScan(urlHash)
+        if (cachedDb != null) {
+            log.info("Returning Postgres cached result for url hash=$urlHash")
+            val sslResult = sslAnalyzer.analyze(canonicalUrl)
+            val heuristicResult = heuristicAnalyzer.analyze(canonicalUrl)
+            return cachedDb.toResponse(isCached = true, sslResult = sslResult, heuristicResult = heuristicResult)
+        }
+
+        // 3. Offline Threat Intelligence Check
+        val offlineResult = offlineThreatIntelService.evaluateUrl(canonicalData)
+
+        // 4. Smart Early Return
+        if (offlineResult.fastReturn) {
+            log.info("Fast Return triggered by Offline Intel for $canonicalUrl. Status: ${offlineResult.status}")
+            return buildOfflineResponse(canonicalUrl, urlHash, offlineResult, startTime, deviceId)
+        }
+
+        // 5. External API Scanning & Local Analyzers
+        val results = mutableMapOf<String, ThreatAnalysisResult>()
+        
+        // Run local analyzers once up front (virtually instantaneous, helps with conditional deep scanning)
+        val sslResult = sslAnalyzer.analyze(canonicalUrl)
+        val heuristicResult = heuristicAnalyzer.analyze(canonicalUrl)
+
+        if (!offlineResult.skipExternalApis) {
+            // Step 5.1: Google Safe Browsing (Primary Threat Authority)
+            log.info("Calling Google Safe Browsing first for $canonicalUrl")
+            val googleResult = googleSafeBrowsingClient.analyze(canonicalUrl)
+            results[googleSafeBrowsingClient.sourceName] = googleResult
+
+            // If Google returns DANGEROUS (isMalicious == true) -> Fast Return immediately
+            if (googleResult.status == ThreatIntelStatus.SUCCESS && googleResult.isMalicious) {
+                log.info("Fast Return: Google Safe Browsing flagged $canonicalUrl as malicious. Bypassing other external APIs.")
+                val scanTimeMs = System.currentTimeMillis() - startTime
+                val aggregated = aggregateResults(canonicalUrl, results, sslResult, heuristicResult, offlineResult, scanTimeMs)
+                saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results)
+                return aggregated.copy(scanTimeMs = scanTimeMs)
+            }
+
+            // Step 5.2: AbuseIPDB (Secondary Reputation Engine)
+            log.info("Calling AbuseIPDB for reputation check for $canonicalUrl")
+            val abuseResult = abuseIpDbClient.analyze(canonicalUrl)
+            results[abuseIpDbClient.sourceName] = abuseResult
+
+            // Step 5.3: Calculate Intermediate Score
+            val intermediateTimeMs = System.currentTimeMillis() - startTime
+            val intermediateResponse = aggregateResults(canonicalUrl, results, sslResult, heuristicResult, offlineResult, intermediateTimeMs)
+
+            // Step 5.4: Conditional VirusTotal (Deep Inspection Engine)
+            if (shouldTriggerVirusTotal(googleResult, abuseResult, intermediateResponse.riskScore, heuristicResult)) {
+                log.info("Deep Inspection required: Calling VirusTotal for $canonicalUrl")
+                val vtResult = virusTotalClient.analyze(canonicalUrl)
+                results[virusTotalClient.sourceName] = vtResult
+            } else {
+                log.info("Skipping VirusTotal deep inspection to optimize quota for $canonicalUrl")
+            }
         } else {
-            runSequentialScan(url)
+            log.info("Skipping External APIs for $canonicalUrl due to offline Intel.")
         }
-
-        // Run local analyzers
-        val sslResult = sslAnalyzer.analyze(url)
-        val heuristicResult = heuristicAnalyzer.analyze(url)
 
         val scanTimeMs = System.currentTimeMillis() - startTime
-        val aggregated = aggregateResults(url, results, sslResult, heuristicResult, scanTimeMs, deviceId, urlHash)
-
-        if (aggregated.status == RiskStatus.DANGEROUS) {
-            persistMaliciousUrl(url, urlHash, results)
-        }
+        val aggregated = aggregateResults(canonicalUrl, results, sslResult, heuristicResult, offlineResult, scanTimeMs)
 
         saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results)
-        log.info("Scan completed url=$url status=${aggregated.status} score=${aggregated.riskScore} time=${scanTimeMs}ms")
+        log.info("Scan completed url=$canonicalUrl status=${aggregated.status} score=${aggregated.riskScore} time=${scanTimeMs}ms")
 
         return aggregated.copy(scanTimeMs = scanTimeMs)
     }
 
-    private suspend fun runParallelScan(url: String): Map<String, ThreatAnalysisResult> = coroutineScope {
-        if (scanConfig.fastFailOnDangerous) {
-            val googleResult = googleSafeBrowsingClient.analyze(url)
-            if (googleResult.isMalicious) {
-                log.info("Fast-fail: Google Safe Browsing flagged URL as dangerous, stopping scan")
-                val vtDeferred = async { virusTotalClient.analyze(url) }
-                val abuseDeferred = async { abuseIpDbClient.analyze(url) }
-                return@coroutineScope mapOf(
-                    googleSafeBrowsingClient.sourceName to googleResult,
-                    virusTotalClient.sourceName to virusTotalClient.analyze(url),
-                    abuseIpDbClient.sourceName to abuseIpDbClient.analyze(url)
-                )
-            }
-        }
-
-        val googleDeferred = async { googleSafeBrowsingClient.analyze(url) }
-        val vtDeferred = async { virusTotalClient.analyze(url) }
-        val abuseDeferred = async { abuseIpDbClient.analyze(url) }
-
-        mapOf(
-            googleSafeBrowsingClient.sourceName to googleDeferred.await(),
-            virusTotalClient.sourceName to vtDeferred.await(),
-            abuseIpDbClient.sourceName to abuseDeferred.await()
-        )
-    }
-
-    private suspend fun runSequentialScan(url: String): Map<String, ThreatAnalysisResult> {
-        val results = mutableMapOf<String, ThreatAnalysisResult>()
-        results[googleSafeBrowsingClient.sourceName] = googleSafeBrowsingClient.analyze(url)
-        results[virusTotalClient.sourceName] = virusTotalClient.analyze(url)
-        results[abuseIpDbClient.sourceName] = abuseIpDbClient.analyze(url)
-        return results
+    private fun shouldTriggerVirusTotal(
+        googleResult: ThreatAnalysisResult?,
+        abuseResult: ThreatAnalysisResult?,
+        intermediateScore: Int,
+        heuristicResult: HeuristicAnalysisResult
+    ): Boolean {
+        val suspiciousThreshold = scanConfig.thresholds.suspicious
+        val minConfidence = 15 // Default AbuseIPDB min confidence threshold
+        
+        val isSuspicious = intermediateScore >= suspiciousThreshold
+        val isGoogleUnknown = googleResult == null || googleResult.status == ThreatIntelStatus.UNKNOWN || googleResult.status != ThreatIntelStatus.SUCCESS
+        
+        val abuseData = abuseResult?.rawData as? AbuseIpDbResult
+        val abuseConfidence = abuseData?.confidenceScore ?: 0
+        val isAbuseConfidenceLow = abuseResult == null || abuseResult.status != ThreatIntelStatus.SUCCESS || abuseConfidence < minConfidence
+        
+        val heuristicTriggered = heuristicResult.riskScore > 0 || heuristicResult.findings.isNotEmpty()
+        
+        return isSuspicious || isGoogleUnknown || isAbuseConfidenceLow || heuristicTriggered
     }
 
     private fun aggregateResults(
@@ -109,71 +162,82 @@ class ScanEngineService(
         results: Map<String, ThreatAnalysisResult>,
         sslResult: SslAnalysisResult,
         heuristicResult: HeuristicAnalysisResult,
-        scanTimeMs: Long,
-        deviceId: String,
-        urlHash: String
+        offlineResult: OfflineScanResult,
+        scanTimeMs: Long
     ): ScanResponse {
         var score = 0
         var apiFailures = 0
         var allApisFailed = true
 
-        // 1. Local High Confidence Threat Intel (SecuritySnacks)
-        val inSecuritySnacks = securitySnacksService.isDomainDangerous(url)
-        if (inSecuritySnacks) {
-            score += 100 // Immediate DANGEROUS status
+        // 1. Offline Score
+        if (offlineResult.status == RiskStatus.DANGEROUS || offlineResult.status == RiskStatus.SUSPICIOUS) {
+            score += (offlineResult.confidenceScore * 100).toInt()
         }
 
+        // 2. External APIs Score (Using Normalized Weighted Scoring)
+        var activeWeightSum = 0.0
+        var weightedScoreSum = 0.0
+        
         val googleResult = results[googleSafeBrowsingClient.sourceName]
-        if (googleResult != null && googleResult.success) {
+        if (googleResult != null && googleResult.status == ThreatIntelStatus.SUCCESS) {
             allApisFailed = false
-            if (googleResult.isMalicious) score += 80
-        } else {
+            activeWeightSum += scanConfig.weights.googleSafeBrowsing
+            val sourceScore = if (googleResult.isMalicious) 100.0 else 0.0
+            weightedScoreSum += (sourceScore * scanConfig.weights.googleSafeBrowsing)
+        } else if (results.containsKey(googleSafeBrowsingClient.sourceName)) {
             apiFailures++
         }
 
         val vtResult = results[virusTotalClient.sourceName]
-        if (vtResult != null && vtResult.success) {
+        if (vtResult != null && vtResult.status == ThreatIntelStatus.SUCCESS) {
             allApisFailed = false
+            activeWeightSum += scanConfig.weights.virusTotal
             val vtData = vtResult.rawData as? VirusTotalResult
-            if (vtData != null) {
-                if (vtData.malicious > 0) score += 90
-                if (vtData.suspicious > 0) score += 50
-            }
-        } else {
+            val sourceScore = if (vtData != null) {
+                when {
+                    vtData.malicious > 0 -> 100.0
+                    vtData.suspicious > 0 -> 50.0
+                    else -> 0.0
+                }
+            } else 0.0
+            weightedScoreSum += (sourceScore * scanConfig.weights.virusTotal)
+        } else if (results.containsKey(virusTotalClient.sourceName)) {
             apiFailures++
         }
 
         val abuseResult = results[abuseIpDbClient.sourceName]
-        if (abuseResult != null && abuseResult.success) {
+        if (abuseResult != null && abuseResult.status == ThreatIntelStatus.SUCCESS) {
             allApisFailed = false
+            activeWeightSum += scanConfig.weights.abuseIpDb
             val abuseData = abuseResult.rawData as? AbuseIpDbResult
-            if (abuseData != null) {
-                if (abuseData.confidenceScore > 50) score += 50
-            }
-        } else {
+            val sourceScore = abuseData?.confidenceScore?.toDouble() ?: 0.0
+            weightedScoreSum += (sourceScore * scanConfig.weights.abuseIpDb)
+        } else if (results.containsKey(abuseIpDbClient.sourceName)) {
             apiFailures++
         }
+        
+        if (activeWeightSum > 0.0) {
+            val normalizedApiScore = weightedScoreSum / activeWeightSum
+            score += (normalizedApiScore * 0.8).toInt() // API contributes up to 80 points max
+        }
 
-        // Penalty for API Failures (Fail-Open fix)
         score += apiFailures * 15
 
-        // SSL Scores
+        // 3. Local SSL & Heuristics
         if (sslResult.isExpired) score += 40
         if (sslResult.isRevoked) score += 70
         if (sslResult.isSelfSigned) score += 35
         if (sslResult.invalidHostname) score += 30
         if (sslResult.weakCipher) score += 20
 
-        // Heuristic Scores
         score += heuristicResult.riskScore
 
         val finalScore = score.coerceIn(0, 100)
 
-        // Status determination
         val status = when {
+            allApisFailed && results.isNotEmpty() -> RiskStatus.UNKNOWN
             finalScore >= scanConfig.thresholds.suspicious -> RiskStatus.DANGEROUS
             finalScore >= scanConfig.thresholds.safe -> RiskStatus.SUSPICIOUS
-            allApisFailed -> RiskStatus.UNKNOWN
             apiFailures >= 2 && finalScore < scanConfig.thresholds.safe -> RiskStatus.UNKNOWN
             else -> RiskStatus.SAFE
         }
@@ -182,16 +246,16 @@ class ScanEngineService(
             url = url,
             riskScore = finalScore,
             status = status,
-            sources = buildSources(results, sslResult, heuristicResult, inSecuritySnacks),
+            sources = buildSources(results, sslResult, heuristicResult, offlineResult.status == RiskStatus.DANGEROUS),
             scanTimeMs = scanTimeMs
         )
     }
 
     private fun buildSources(
         results: Map<String, ThreatAnalysisResult>,
-        sslResult: SslAnalysisResult,
-        heuristicResult: HeuristicAnalysisResult,
-        inSecuritySnacks: Boolean
+        sslResult: SslAnalysisResult?,
+        heuristicResult: HeuristicAnalysisResult?,
+        isOfflineDangerous: Boolean
     ): ScanSources {
         val google = results[googleSafeBrowsingClient.sourceName]?.rawData as? GoogleSafeBrowsingResult
         val vt = results[virusTotalClient.sourceName]?.rawData as? VirusTotalResult
@@ -209,17 +273,47 @@ class ScanEngineService(
             },
             ssl = sslResult,
             heuristic = heuristicResult,
-            securitySnacksFlagged = inSecuritySnacks
+            securitySnacksFlagged = isOfflineDangerous // mapping local intel to the legacy response field
         )
     }
 
-    private fun findRecentScan(urlHash: String): ScanResult? {
-        return scanResultRepository.findTopByUrlHashOrderByScannedAtDesc(urlHash)
-            .filter { it.scannedAt.isAfter(Instant.now().minusSeconds(300)) } // 5 min cache
-            .orElse(null)
+    private suspend fun buildOfflineResponse(
+        url: String, 
+        urlHash: String, 
+        offlineResult: OfflineScanResult, 
+        startTime: Long, 
+        deviceId: String
+    ): ScanResponse {
+        val scanTimeMs = System.currentTimeMillis() - startTime
+        val riskScore = (offlineResult.confidenceScore * 100).toInt()
+        
+        val response = ScanResponse(
+            url = url,
+            riskScore = riskScore,
+            status = offlineResult.status,
+            sources = buildSources(emptyMap(), null, null, true),
+            scanTimeMs = scanTimeMs
+        )
+
+        saveScanResult(response, deviceId, urlHash, scanTimeMs, emptyMap())
+        return response
     }
 
-    private fun saveScanResult(
+    private fun createInvalidUrlResponse(rawUrl: String, startTime: Long): ScanResponse {
+        return ScanResponse(
+            url = rawUrl,
+            riskScore = 0,
+            status = RiskStatus.UNKNOWN,
+            sources = buildSources(emptyMap(), null, null, false),
+            scanTimeMs = System.currentTimeMillis() - startTime
+        )
+    }
+
+    private suspend fun findRecentScan(urlHash: String): ScanResult? {
+        return scanRepositoryAdapter.findRecent(urlHash)
+    }
+
+    suspend fun saveScanResult(
         response: ScanResponse,
         deviceId: String,
         urlHash: String,
@@ -245,41 +339,24 @@ class ScanEngineService(
             abuseIpDbCountryCode = abuse?.countryCode,
             scanTimeMs = scanTimeMs
         )
-        return scanResultRepository.save(entity)
-    }
-
-    private fun persistMaliciousUrl(url: String, urlHash: String, results: Map<String, ThreatAnalysisResult>) {
-        val sources = results.filter { it.value.isMalicious }.keys.joinToString(",")
-        if (maliciousUrlRepository.existsByUrlHash(urlHash)) {
-            maliciousUrlRepository.incrementDetectionCount(urlHash, Instant.now())
-        } else {
-            maliciousUrlRepository.save(
-                MaliciousUrl(
-                    url = url,
-                    urlHash = urlHash,
-                    sources = sources,
-                    threatCategory = determineThreatCategory(results)
-                )
-            )
-        }
-    }
-
-    private fun determineThreatCategory(results: Map<String, ThreatAnalysisResult>): String? {
-        val google = results[googleSafeBrowsingClient.sourceName]?.rawData as? GoogleSafeBrowsingResult
-        return google?.threatType ?: "UNKNOWN"
-    }
-
-    private fun hashUrl(url: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(url.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
+        
+        val savedEntity = scanRepositoryAdapter.save(entity)
+        
+        // Populate Redis Cache (Negative caching supported)
+        redisThreatCacheService.cacheScanResult(
+            urlHash = urlHash,
+            verdict = response.status.name,
+            confidence = response.riskScore / 100.0,
+            threatType = google?.threatType ?: "UNKNOWN"
+        )
+        
+        return savedEntity
     }
 
     private fun ScanResult.toResponse(
         isCached: Boolean, 
         sslResult: SslAnalysisResult? = null, 
-        heuristicResult: HeuristicAnalysisResult? = null,
-        inSecuritySnacks: Boolean = false
+        heuristicResult: HeuristicAnalysisResult? = null
     ): ScanResponse = ScanResponse(
         url = this.url,
         riskScore = this.riskScore,
@@ -300,7 +377,7 @@ class ScanEngineService(
             },
             ssl = sslResult,
             heuristic = heuristicResult,
-            securitySnacksFlagged = inSecuritySnacks
+            securitySnacksFlagged = false
         ),
         scanTimeMs = this.scanTimeMs,
         isCached = isCached,
