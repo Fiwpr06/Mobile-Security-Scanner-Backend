@@ -136,6 +136,7 @@ class ScanEngineService(
         return aggregated.copy(scanTimeMs = scanTimeMs)
     }
 
+    // FEAT: Conditional VirusTotal escalation based on risk score
     private fun shouldTriggerVirusTotal(
         googleResult: ThreatAnalysisResult?,
         abuseResult: ThreatAnalysisResult?,
