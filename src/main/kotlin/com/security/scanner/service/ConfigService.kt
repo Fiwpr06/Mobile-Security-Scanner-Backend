@@ -4,13 +4,13 @@ import com.security.scanner.config.ScanConfig
 import com.security.scanner.domain.dto.*
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import com.security.scanner.repository.SecuritySnacksRepository
+import com.security.scanner.repository.DangerousDomainRepository
 import org.springframework.data.domain.PageRequest
 
 @Service
 class ConfigService(
     private val scanConfig: ScanConfig,
-    private val securitySnacksRepository: SecuritySnacksRepository,
+    private val dangerousDomainRepository: DangerousDomainRepository,
     @Value("\${app.minimum-app-version:1.0.0}") private val minimumAppVersion: String,
     @Value("\${app.maintenance:false}") private val maintenance: Boolean,
     @Value("\${app.maintenance-message:}") private val maintenanceMessage: String
@@ -40,7 +40,7 @@ class ConfigService(
                 "cachingEnabled" to true,
                 "reportingEnabled" to true
             ),
-            offlineThreatList = securitySnacksRepository.findTopActiveDomains(PageRequest.of(0, 1000))
+            offlineThreatList = dangerousDomainRepository.findAll(PageRequest.of(0, 1000)).map { it.domain }.toList()
         )
     }
 }
