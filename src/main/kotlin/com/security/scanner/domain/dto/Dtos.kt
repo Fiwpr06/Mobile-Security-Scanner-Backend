@@ -1,5 +1,6 @@
 package com.security.scanner.domain.dto
 
+import com.security.scanner.common.ValidUrl
 import com.security.scanner.domain.model.RiskStatus
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
@@ -26,6 +27,7 @@ data class DeviceRegistrationRequest(
 @Schema(description = "URL scan request")
 data class ScanRequest(
     @field:NotBlank(message = "URL is required")
+    @field:ValidUrl(message = "URL must be a valid http/https URL and cannot point to private IPs or localhost")
     @Schema(description = "URL to scan", example = "https://example.com")
     val url: String
 )
