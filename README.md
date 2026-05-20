@@ -1,8 +1,8 @@
 # 🔐 Mobile Security Scanner — Backend
 
-> **Production-ready Kotlin/Spring Boot backend** for intelligent URL threat analysis.
-> Integrates Google Safe Browsing, VirusTotal, AbuseIPDB, and SecuritySnacks Feed
-> with weighted scoring, async parallel scanning, JWT auth, and full Docker deployment support.
+> **Production-Grade Kotlin/Spring Boot backend** for intelligent URL threat analysis.  
+> Integrates Google Safe Browsing, AbuseIPDB, VirusTotal, and Offline Threat Feeds  
+> with a **Priority-Based Sequential Scanning Pipeline**, custom weighted scoring, variable Redis caching, and reactive structured concurrency.
 
 ---
 
@@ -25,87 +25,101 @@
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐   │
 │  │ Auth API     │  │  Scan API    │  │ Threat Intel API   │   │
-│  │ /auth/register│  │  /scan       │  │ /report, /threats  │   │
+│  │ /auth/register│  │  /scan       │  │ /stats, /search    │   │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬─────────┘   │
 │         │                 │                       │             │
 │  ┌──────▼─────────────────▼───────────────────────▼─────────┐  │
 │  │                  Service Layer                            │  │
-│  │  AuthService │ ScanEngineService │ ThreatIntelService    │  │
+│  │  AuthService  │ ScanEngineService │ ThreatIntelService   │  │
 │  └──────────────────────┬──────────────────────────────────┘  │
-│                         │ Parallel Async (Coroutines)          │
-│         ┌───────────────┼───────────────┬────────────────┐     │
-│         ▼               ▼               ▼                ▼     │
-│  ┌─────────────┐ ┌────────────┐ ┌──────────────┐ ┌─────────────┐│
-│  │Google Safe  │ │VirusTotal  │ │  AbuseIPDB   │ │ SSL, Snack &││
-│  │Browsing     │ │Client      │ │  Client      │ │ Heuristic   ││
-│  │(High Weight)│ │(Med Weight)│ │(Low Weight)  │ │ (Local)     ││
-│  └─────────────┘ └────────────┘ └──────────────┘ └─────────────┘│
-│         │ Circuit Breaker + Retry + Exponential Backoff        │
-│  ┌──────▼──────────────────────────────────────────────────┐  │
-│  │         Hybrid Weighted Risk Engine                      │  │
-│  │  SAFE | SUSPICIOUS | DANGEROUS | UNKNOWN (Fail-Closed)   │  │
+│                         │ Sequential Pipeline (Non-Blocking)   │
+│                         ▼                                     │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 1. Offline Threat Shield (Bloom Filter + DB Lookup)     │  │
+│  └──────────────────────┬──────────────────────────────────┘  │
+│                         ▼ (Bloom Filter Miss)                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 2. Google Safe Browsing (Fast Return if Malicious)       │  │
+│  └──────────────────────┬──────────────────────────────────┘  │
+│                         ▼ (Google Safe / Unknown)             │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 3. AbuseIPDB Reputation Scan (Reputation Confidence)     │  │
+│  └──────────────────────┬──────────────────────────────────┘  │
+│                         ▼ (Conditional VT Escalation)         │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 4. VirusTotal Scanner (Deep Analysis for Gray URLs)     │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌─────────────────┐  ┌──────────────┐  ┌──────────────────┐  │
 │  │   PostgreSQL    │  │    Redis     │  │   Prometheus +   │  │
-│  │  (Persistence)  │  │   (Cache +   │  │     Grafana      │  │
-│  │                 │  │ Rate Limit)  │  │  (Monitoring)    │  │
+│  │ (Async Adapter) │  │  (Jackson +   │  │     Grafana      │  │
+│  │                 │  │ Variable TTL)│  │  (Monitoring)    │  │
 │  └─────────────────┘  └──────────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Package Structure (Clean/Hexagonal Architecture)
+### Package Structure (Clean Layered Architecture)
 
 ```
 src/main/kotlin/com/security/scanner/
 ├── MobileSecurityScannerApplication.kt
-├── controller/          # REST API controllers (Adapters - Input)
+├── controller/          # REST API controllers (Presentation Layer)
 │   ├── AuthController.kt
-│   ├── ScanController.kt
+│   ├── ScanController.kt          # Suspend Controller (no runBlocking)
 │   ├── ConfigController.kt
 │   └── ThreatIntelligenceController.kt
-├── service/             # Business logic (Application Layer)
+├── service/             # Business Logic & Orchestration
 │   ├── AuthService.kt
-│   ├── ScanEngineService.kt
+│   ├── ScanEngineService.kt       # Sequential Scanning Pipeline
 │   ├── ConfigService.kt
 │   ├── ThreatIntelligenceService.kt
-│   └── SecuritySnacksIngestionService.kt
+│   ├── CanonicalUrlService.kt     # URL normalization & Punycode conversion
+│   ├── BloomFilterService.kt      # Guava Bloom Filter for offline threat lookup
+│   ├── CsvThreatFeedIngestionService.kt # Ingests threat intel feeds from CSV
+│   ├── DomainReputationService.kt  # Aggregates reputation score at domain level
+│   ├── OfflineThreatIntelService.kt # Local fast-path threat checker
+│   ├── RedisThreatCacheService.kt  # Variable TTL Redis Cache (Jackson serialize)
+│   └── ThreatExportService.kt     # Bulk export threat intel data
 ├── ssl/                 # SSL/TLS Analysis Module
 │   └── SslAnalyzer.kt
 ├── heuristic/           # Heuristic Detection Engine
 │   └── HeuristicAnalyzer.kt
-├── domain/              # Domain models and DTOs
+├── domain/              # Domain Models, Entities & DTOs
 │   ├── model/           # JPA Entities
 │   │   ├── Device.kt
 │   │   ├── ScanResult.kt
-│   │   ├── MaliciousUrl.kt
+│   │   ├── MaliciousUrl.kt       # Redesigned with canonical fields & indexes
+│   │   ├── DangerousDomain.kt    # Aggregated domain-level reputation metrics
+│   │   ├── IngestionMetadata.kt  # Tracks ingested feed file status & checksums
 │   │   └── FalseNegativeReport.kt
-│   └── dto/             # API Request/Response objects
+│   └── dto/             # Request & Response schemas
 │       └── Dtos.kt
-├── repository/          # Database access (Adapters - Output)
+├── repository/          # Database Persistence
 │   ├── DeviceRepository.kt
 │   ├── ScanResultRepository.kt
-│   ├── MaliciousUrlRepository.kt
-│   ├── FalseNegativeReportRepository.kt
-│   └── SecuritySnacksRepository.kt
-├── external/            # Third-party integrations (Adapters - Output)
+│   ├── MaliciousUrlRepository.kt  # Native Postgres upsert query (ON CONFLICT)
+│   ├── DangerousDomainRepository.kt
+│   ├── IngestionMetadataRepository.kt
+│   ├── ScanRepositoryAdapter.kt   # Thread-isolated non-blocking JPA Adapter
+│   └── FalseNegativeReportRepository.kt
+├── external/            # Third-Party Integrations
 │   └── integration/
-│       ├── ThreatIntelligencePort.kt  # Port interface
+│       ├── ThreatIntelligencePort.kt  # Integrates ThreatIntelStatus Enum
 │       ├── GoogleSafeBrowsingClient.kt
-│       ├── VirusTotalClient.kt
-│       ├── AbuseIpDbClient.kt
-│       └── SecuritySnacksClient.kt
-├── security/            # Authentication & Security
+│       ├── VirusTotalClient.kt        # Custom 404 UNKNOWN state (Zero-day protection)
+│       └── AbuseIpDbClient.kt
+├── security/            # Authentication, Filters & Rate Limiter
 │   ├── JwtService.kt
 │   ├── JwtAuthenticationFilter.kt
-│   └── RateLimitingFilter.kt
-├── config/              # Spring configuration
+│   └── RateLimitingFilter.kt      # Redis INCR/TTL atomic rate limiter
+├── config/              # Spring Boot Configurations
 │   ├── SecurityConfig.kt
-│   ├── SecuritySnacksConfig.kt
-│   ├── AppConfig.kt       # Typed properties
+│   ├── AppConfig.kt
+│   ├── DatasetConfidenceConfig.kt # Dynamic offline data source trust metrics
 │   ├── WebClientConfig.kt
 │   └── OpenApiConfig.kt
-└── common/              # Shared utilities
+└── common/              # Shared Utilities & Base Classes
+    ├── BackgroundJobScope.kt      # Lifecycle-aware supervisor coroutine scope
     ├── GlobalExceptionHandler.kt
     ├── RequestLoggingFilter.kt
     └── UrlValidator.kt
@@ -117,7 +131,7 @@ src/main/kotlin/com/security/scanner/
 
 ### Prerequisites
 - Docker & Docker Compose
-- JDK 21 (for running without Docker)
+- JDK 21 (for running locally)
 - OpenSSL (for SSL cert generation)
 
 ### 1. Clone & Configure
@@ -164,7 +178,7 @@ open http://localhost:8080/swagger-ui.html
 
 ### Authentication
 
-**POST** `/api/v1/auth/register` — Register device & get JWT
+**POST** `/api/v1/auth/register` — Register device & get JWT (uses atomic `isNewDevice` check)
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
@@ -189,7 +203,7 @@ Response:
 
 ### Scan URL
 
-**POST** `/api/v1/scan` — Analyze URL for threats
+**POST** `/api/v1/scan` — Analyze URL for threats (uses Sequential Priority Scanning)
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/scan \
@@ -224,202 +238,102 @@ Response:
       },
       "securitySnacksFlagged": true
     },
-    "scanTimeMs": 532,
+    "scanTimeMs": 142,
     "isCached": false
   }
 }
 ```
 
 **Risk Status:**
-| Score | Status |
-|-------|--------|
-| 0–29 | `SAFE` ✅ |
-| 30–59 | `SUSPICIOUS` ⚠️ |
-| 60–100 | `DANGEROUS` 🚫 |
-| N/A | `UNKNOWN` ❓ (API Failures) |
+| Score | Status | Description |
+|-------|--------|-------------|
+| 0–29 | `SAFE` ✅ | URL is safe to navigate |
+| 30–59 | `SUSPICIOUS` ⚠️ | URL shows moderate risk factors |
+| 60–100 | `DANGEROUS` 🚫 | URL is a confirmed threat |
+| N/A | `UNKNOWN` ❓ | Active scan failure (Fail-Closed) |
 
 ---
 
-### Dynamic Config
+### Threat Intelligence & Stats
 
-**GET** `/api/v1/config`
+**GET** `/api/v1/threats/stats` — Detailed analytics on local threats & files ingested.
 
-```json
-{
-  "weights": { "google": 0.5, "virusTotal": 0.3, "abuseIpDb": 0.2 },
-  "thresholds": { "safe": 30, "suspicious": 60 },
-  "timeoutMs": 10000,
-  "maintenance": false,
-  "minimumAppVersion": "1.0.0",
-  "featureFlags": {
-    "parallelScan": true,
-    "fastFailOnDangerous": true,
-    "cachingEnabled": true
-  },
-  "offlineThreatList": [
-    "bad-domain.com",
-    "phishing-site.net"
-  ]
-}
+**GET** `/api/v1/threats/search?query=phish` — Full-text and wildcard local database search.
+
+**GET** `/api/v1/threats/top-domains?page=0&pageSize=20` — Domains with the highest malicious counts & worst reputations.
+
+---
+
+## 🔒 Production-Grade Security Features
+
+| Feature | Implementation Details |
+|---------|------------------------|
+| **Device-Based JWT** | Custom `JwtAuthenticationFilter` with fast database validation. |
+| **SSRF Protection** | `@ValidUrl` request validation rejecting private, loopback, and local IP addresses. |
+| **Atomic Rate Limiter** | Redis-based `RateLimitingFilter` using `INCR` + `TTL` atomic checks to prevent infinite lockouts on network drops. |
+| **Punycode / Normalization** | `CanonicalUrlService` handles domain homograph attacks, strips tracking parameters, and lowercases domain paths. |
+| **Offline Ingestion Shield** | Ingests OSINT feeds into a local **Guava Bloom Filter** for instantaneous lookup under 2ms. |
+| **Robust API Statuses** | `ThreatIntelStatus` maps `SUCCESS`, `UNKNOWN`, `TIMEOUT`, `RATE_LIMITED`, `FAILED` for clear upstream handling. |
+| **Zero-Day 404 Mapping** | VirusTotal `404` errors are mapped to `UNKNOWN` instead of `SAFE` (preventing false negative zero-day bypasses). |
+| **Fail-Closed Strategy** | If all upstream APIs fail, the scan returns `UNKNOWN` to warn the client rather than assuming safety. |
+| **Non-blocking Controllers** | Replaced `runBlocking` with Spring Web MVC `suspend fun` controller methods to free Tomcat threads during remote I/O. |
+| **Persistence Isolation** | `ScanRepositoryAdapter` encapsulates blocking JDBC/JPA operations on `Dispatchers.IO` to keep business logic thread-safe. |
+| **Negative Caching** | Redis variable TTLs (`DANGEROUS` 30 days, `SAFE` 15 mins, `UNKNOWN` 3 mins) to avoid overloading remote APIs. |
+| **Structured Concurrency** | `BackgroundJobScope` manages asynchronous ingestion tasks via a dedicated `SupervisorJob` and handles server shutdown events. |
+
+---
+
+## 🏗️ Priority-Based Sequential Scan Pipeline
+
+Instead of launching parallel HTTP requests that exhaust API quotas (especially VirusTotal's strict limits), the backend evaluates threat actors sequentially using a priority pipeline:
+
+```
+                  ┌──────────────────────┐
+                  │      Scan Request    │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+               ┌───────────────────────────┐
+               │    Offline Bloom Shield   │──[HIT]──┐
+               └─────────────┬─────────────┘         │
+                             │ [MISS]                │
+                             ▼                       ▼
+               ┌───────────────────────────┐   ┌─────────────┐
+               │   Google Safe Browsing    │   │ Local Cache │
+               └─────────────┬─────────────┘   └─────────────┘
+                             │
+                     [Flagged Malicious?]
+                     ├─── Yes ───► [FAST RETURN DANGEROUS] (Skip external API calls)
+                     └─── No / Err
+                           │
+                           ▼
+               ┌───────────────────────────┐
+               │    AbuseIPDB Reputation   │
+               └─────────────┬─────────────┘
+                             │
+                    [Escalation Triggers?]
+                    ├─── Yes ───► [VirusTotal Deep Scan]
+                    └─── No  ───► [Assemble Local Verdict]
 ```
 
+### Escalation Triggers for VirusTotal Deep Scan
+VirusTotal is called **only if** safety cannot be verified through cheaper engines:
+1. Google Safe Browsing returned `UNKNOWN` or an active failure (timeout, rate limit).
+2. The domain reputation is unknown or IP abuse confidence is low/unavailable.
+3. Local heuristic analysis raises high-risk findings (e.g., suspicious Punycode patterns, fake login keywords).
+4. The intermediate calculated risk score is in the `SUSPICIOUS` range.
+
 ---
 
-### Report False Negative
-
-**POST** `/api/v1/report`
+## 🧪 Running Tests & Compiling
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/report \
-  -H "Authorization: Bearer <YOUR_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://phishing-site.com",
-    "originalStatus": "SAFE",
-    "originalRiskScore": 10,
-    "userDescription": "This site stole my credentials"
-  }'
-```
+# Compile and check Kotlin configuration
+./gradlew compileKotlin
 
----
-
-### Top Threats
-
-**GET** `/api/v1/threats/top?page=0&pageSize=20`
-
----
-
-## 🔒 Security Features
-
-| Feature | Implementation |
-|---------|---------------|
-| **Authentication** | Device-based JWT (no username/password) |
-| **API Key Protection** | All 3rd-party keys server-side only |
-| **Rate Limiting** | Redis-based: 100 req/device/hr, 200 req/IP/hr |
-| **URL Validation** | Blocks private IPs, localhost, invalid schemes |
-| **SSL Analyzer** | Expired, Revoked, Self-Signed, Weak Cipher detection |
-| **Heuristic Engine** | Punycode, Fake Login, URL Shortener, Subdomain abuse |
-| **Offline Protection** | Auto-discovery of all SecuritySnacks feeds via GitHub Tree API |
-| **Ingestion Pipeline** | Automated Cron + Startup sync with Redis & Postgres caching |
-| **Secure Headers** | X-Frame-Options, CSP, HSTS, XSS-Protection |
-| **Circuit Breaker** | Resilience4j per each 3rd-party service |
-| **Retry + Backoff** | Exponential backoff on failures |
-| **HTTPS** | Nginx SSL termination |
-| **Input Validation** | Jakarta Bean Validation on all inputs |
-
----
-
-## 🏗️ Scan Engine Details
-
-### Hybrid Weighted Scoring Engine
-
-```
-finalScore = Σ(sourceScore) -> Capped at 100
-
-Primary Drivers:
-  SecuritySnacks       : +100 (High Confidence Threat Intel)
-  Google Safe Browsing : +80 (Flagged)
-  VirusTotal           : +90 (Malicious > 0), +50 (Suspicious > 0)
-  AbuseIPDB            : +50 (Confidence > 50%)
-  SSL Analysis         : +20 to +70 (Expired, Revoked, Weak Ciphers)
-  Heuristic Analysis   : +10 to +40 (Punycode, Keywords, Fake Logins)
-  API Failure Penalty  : +15 per failed service (Fail-Closed Policy)
-```
-
-### Smart Parallel Scan Flow
-
-```
-Request → [Google Safe Browsing] ──→ flagged? ──YES──→ Fast-return DANGEROUS
-                                          │
-                                         NO
-                                          ↓
-                              [All 3 sources in parallel]
-                                          ↓
-                              Weighted score aggregation
-                                          ↓
-                              SAFE | SUSPICIOUS | DANGEROUS
-```
-
----
-
-## 🐳 Production Deployment (Ubuntu VPS)
-
-```bash
-# 1. Clone repo
-git clone <repo-url> /opt/security-scanner
-cd /opt/security-scanner
-
-# 2. Configure environment
-cp .env.example .env
-nano .env  # Fill in production values
-
-# 3. Set up SSL (Let's Encrypt recommended)
-apt install certbot
-certbot certonly --standalone -d yourdomain.com
-cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem nginx/ssl/cert.pem
-cp /etc/letsencrypt/live/yourdomain.com/privkey.pem nginx/ssl/key.pem
-
-# 4. Start production stack
-docker-compose up -d --build
-
-# 5. Monitor
-docker-compose logs -f app
-```
-
----
-
-## 🔑 API Keys Setup
-
-| Service | Get Key |
-|---------|---------|
-| **Google Safe Browsing** | [Google Cloud Console](https://console.cloud.google.com/) → Enable Safe Browsing API |
-| **VirusTotal** | [virustotal.com/gui/my-apikey](https://www.virustotal.com/gui/my-apikey) |
-| **AbuseIPDB** | [abuseipdb.com/account/api](https://www.abuseipdb.com/account/api) |
-
----
-
-## 📊 Monitoring
-
-| Tool | URL | Credentials |
-|------|-----|-------------|
-| Swagger UI | `http://localhost:8080/swagger-ui.html` | — |
-| Actuator Health | `http://localhost:8080/actuator/health` | — |
-| Prometheus | `http://localhost:9090` | — |
-| Grafana | `http://localhost:3000` | admin/admin123 |
-
----
-
-## 🧪 Running Tests
-
-```bash
-# Unit tests
+# Run unit tests (including CanonicalUrlService and ScanEngineService sequential pipeline)
 ./gradlew test
 
-# With coverage
-./gradlew test jacocoTestReport
-
-# Build JAR
+# Build executable production JAR
 ./gradlew bootJar
 ```
-
----
-
-## ⚙️ Environment Variables Reference
-
-See [`.env.example`](.env.example) for all configurable options.
-
-Key required variables:
-- `JWT_SECRET` — Min 32 chars random string
-- `GOOGLE_SAFE_BROWSING_API_KEY`
-- `VIRUS_TOTAL_API_KEY`
-- `ABUSE_IPDB_API_KEY`
-- `DB_PASSWORD`
-
----
-
-## 🗓️ Development Roadmap
-
-- [x] **Phase 1**: Auth API, JWT, Mock/Real Scan, Swagger, Docker
-- [x] **Phase 2**: Real integrations, weighted scoring, circuit breaker, DB persistence
-- [x] **Phase 3**: SSL/TLS analysis, Heuristic engine, Fail-Closed security policy
-- [ ] **Phase 4**: Monitoring dashboards, analytics, advanced caching, load testing
