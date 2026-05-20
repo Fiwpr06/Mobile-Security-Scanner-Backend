@@ -5,17 +5,20 @@ import com.security.scanner.domain.dto.ReportResponse
 import com.security.scanner.domain.dto.ThreatItem
 import com.security.scanner.domain.dto.ThreatListResponse
 import com.security.scanner.domain.model.FalseNegativeReport
+import com.security.scanner.repository.DangerousDomainRepository
 import com.security.scanner.repository.FalseNegativeReportRepository
 import com.security.scanner.repository.MaliciousUrlRepository
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
 class ThreatIntelligenceService(
     private val maliciousUrlRepository: MaliciousUrlRepository,
-    private val falseNegativeReportRepository: FalseNegativeReportRepository
+    private val falseNegativeReportRepository: FalseNegativeReportRepository,
+    private val dangerousDomainRepository: DangerousDomainRepository
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -68,6 +71,62 @@ class ThreatIntelligenceService(
             reportId = report.id.toString(),
             status = "PENDING",
             message = "Thank you for your report. Our team will review it shortly."
+        )
+    }
+
+    /**
+     * Returns high-level threat intelligence statistics.
+     * Moved here from ThreatIntelligenceController as part of the Layered Architecture fix.
+     */
+    fun getStats(): Map<String, Any> {
+        return mapOf(
+            "totalMaliciousUrls" to maliciousUrlRepository.count(),
+            "totalDangerousDomains" to dangerousDomainRepository.count()
+        )
+    }
+
+    /**
+     * Searches threats sorted by confidence score and detection count.
+     */
+    fun searchThreats(page: Int, size: Int): ThreatListResponse {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "confidenceScore", "detectionCount"))
+        val result = maliciousUrlRepository.findTopThreats(pageable)
+        return ThreatListResponse(
+            threats = result.content.map { url ->
+                ThreatItem(
+                    url = url.url,
+                    threatCategory = url.threatCategory,
+                    detectionCount = url.detectionCount,
+                    lastDetectedAt = url.lastDetectedAt.toString()
+                )
+            },
+            total = result.totalElements,
+            page = page,
+            pageSize = size
+        )
+    }
+
+    /**
+     * Returns top dangerous domains sorted by reputation score.
+     * Returns a safe DTO map instead of a raw JPA entity to prevent
+     * accidental serialization of internal entity fields.
+     */
+    fun getTopDomains(page: Int, size: Int): Map<String, Any> {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "reputationScore"))
+        val result = dangerousDomainRepository.findAll(pageable)
+        return mapOf(
+            "domains" to result.content.map { domain ->
+                mapOf(
+                    "domain" to domain.domain,
+                    "reputationScore" to domain.reputationScore,
+                    "maliciousCount" to domain.maliciousUrlCount,
+                    "firstSeenAt" to domain.firstSeenAt.toString(),
+                    "lastSeenAt" to domain.lastSeenAt.toString()
+                )
+            },
+            "total" to result.totalElements,
+            "page" to page,
+            "pageSize" to size
         )
     }
 }
