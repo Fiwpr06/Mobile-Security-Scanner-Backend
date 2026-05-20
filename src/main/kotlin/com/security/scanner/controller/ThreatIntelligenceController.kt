@@ -19,6 +19,10 @@ import org.springframework.web.bind.annotation.*
 @Tag(name = "Threat Intelligence", description = "Threat reporting and intelligence endpoints")
 @SecurityRequirement(name = "bearerAuth")
 class ThreatIntelligenceController(
+    // ARCHITECTURE FIX: Controller now depends ONLY on the Service layer.
+    // Previously it injected Repositories directly (MaliciousUrlRepository, DangerousDomainRepository),
+    // violating Layered Architecture and Separation of Concerns.
+    // Business logic and DB access now live in ThreatIntelligenceService.
     private val threatIntelligenceService: ThreatIntelligenceService
 ) {
 
@@ -47,6 +51,39 @@ class ThreatIntelligenceController(
         val response = threatIntelligenceService.getTopThreats(
             page = page.coerceAtLeast(0),
             pageSize = pageSize.coerceIn(1, 100)
+        )
+        return ResponseEntity.ok(SuccessResponse(data = response))
+    }
+
+    @GetMapping("/stats")
+    @Operation(summary = "Get threat intelligence statistics")
+    fun getStats(): ResponseEntity<SuccessResponse<Map<String, Any>>> {
+        val stats = threatIntelligenceService.getStats()
+        return ResponseEntity.ok(SuccessResponse(data = stats))
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "Search threat URLs")
+    fun searchThreats(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): ResponseEntity<SuccessResponse<ThreatListResponse>> {
+        val response = threatIntelligenceService.searchThreats(
+            page = page.coerceAtLeast(0),
+            size = size.coerceIn(1, 100)
+        )
+        return ResponseEntity.ok(SuccessResponse(data = response))
+    }
+
+    @GetMapping("/top-domains")
+    @Operation(summary = "Get top dangerous domains")
+    fun getTopDomains(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): ResponseEntity<SuccessResponse<Map<String, Any>>> {
+        val response = threatIntelligenceService.getTopDomains(
+            page = page.coerceAtLeast(0),
+            size = size.coerceIn(1, 100)
         )
         return ResponseEntity.ok(SuccessResponse(data = response))
     }
