@@ -23,38 +23,38 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │               Spring Boot Application (Kotlin)                  │
 │                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐   │
-│  │ Auth API     │  │  Scan API    │  │ Threat Intel API   │   │
-│  │ /auth/register│  │  /scan       │  │ /stats, /search    │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬─────────┘   │
-│         │                 │                       │             │
-│  ┌──────▼─────────────────▼───────────────────────▼─────────┐  │
+│  ┌────────────────┐  ┌──────────────┐  ┌────────────────────┐   │
+│  │ Auth API       │  │  Scan API    │  │ Threat Intel API   │   │
+│  │ /auth/register │  │  /scan       │  │ /stats, /search    │   │
+│  └──────┬─────────┘  └──────┬───────┘  └──────────┬─────────┘   │
+│         │                   │                     │             │
+│  ┌──────▼───────────────────▼─────────────────────▼──────────┐  │
 │  │                  Service Layer                            │  │
-│  │  AuthService  │ ScanEngineService │ ThreatIntelService   │  │
-│  └──────────────────────┬──────────────────────────────────┘  │
-│                         │ Sequential Pipeline (Non-Blocking)   │
-│                         ▼                                     │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │ 1. Offline Threat Shield (Bloom Filter + DB Lookup)     │  │
-│  └──────────────────────┬──────────────────────────────────┘  │
-│                         ▼ (Bloom Filter Miss)                 │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │ 2. Google Safe Browsing (Fast Return if Malicious)       │  │
-│  └──────────────────────┬──────────────────────────────────┘  │
-│                         ▼ (Google Safe / Unknown)             │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │ 3. AbuseIPDB Reputation Scan (Reputation Confidence)     │  │
-│  └──────────────────────┬──────────────────────────────────┘  │
-│                         ▼ (Conditional VT Escalation)         │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │ 4. VirusTotal Scanner (Deep Analysis for Gray URLs)     │  │
-│  └─────────────────────────────────────────────────────────┘  │
+│  │  AuthService  │ ScanEngineService │ ThreatIntelService    │  │
+│  └──────────────────────┬────────────────────────────────────┘  │
+│                         │ Sequential Pipeline (Non-Blocking)    │
+│                         ▼                                       │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 1. Offline Threat Shield (Bloom Filter + DB Lookup)     │    │
+│  └──────────────────────┬──────────────────────────────────┘    │
+│                         ▼ (Bloom Filter Miss)                   │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 2. Google Safe Browsing (Fast Return if Malicious)      │    │
+│  └──────────────────────┬──────────────────────────────────┘    │
+│                         ▼ (Google Safe / Unknown)               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 3. AbuseIPDB Reputation Scan (Reputation Confidence)    │    │
+│  └──────────────────────┬──────────────────────────────────┘    │
+│                         ▼ (Conditional VT Escalation)           │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 4. VirusTotal Scanner (Deep Analysis for Gray URLs)     │    │
+│  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
-│  ┌─────────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   PostgreSQL    │  │    Redis     │  │   Prometheus +   │  │
-│  │ (Async Adapter) │  │  (Jackson +   │  │     Grafana      │  │
-│  │                 │  │ Variable TTL)│  │  (Monitoring)    │  │
-│  └─────────────────┘  └──────────────┘  └──────────────────┘  │
+│  ┌─────────────────┐  ┌──────────────┐  ┌──────────────────┐    │
+│  │   PostgreSQL    │  │    Redis     │  │   Prometheus +   │    │
+│  │ (Async Adapter) │  │  (Jackson +  │  │     Grafana      │    │
+│  │                 │  │ Variable TTL)│  │  (Monitoring)    │    │
+│  └─────────────────┘  └──────────────┘  └──────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -245,12 +245,12 @@ Response:
 ```
 
 **Risk Status:**
-| Score | Status | Description |
-|-------|--------|-------------|
-| 0–29 | `SAFE` ✅ | URL is safe to navigate |
-| 30–59 | `SUSPICIOUS` ⚠️ | URL shows moderate risk factors |
-| 60–100 | `DANGEROUS` 🚫 | URL is a confirmed threat |
-| N/A | `UNKNOWN` ❓ | Active scan failure (Fail-Closed) |
+| Score  |     Status       |            Description            |
+|--------|------------------|-----------------------------------|
+|  0–29  | `SAFE`           | URL is safe to navigate           |
+| 30–59  | `SUSPICIOUS`     | URL shows moderate risk factors   |
+| 60–100 | `DANGEROUS`      | URL is a confirmed threat         |
+|  N/A   | `UNKNOWN`        | Active scan failure (Fail-Closed) |
 
 ---
 
