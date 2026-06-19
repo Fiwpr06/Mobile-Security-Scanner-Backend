@@ -36,9 +36,17 @@ class CanonicalUrlService {
                 // Ignore decoding errors
             }
 
-            // Ensure protocol exists for URI parsing
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://$url"
+            // Ensure protocol exists for URI parsing.
+            // BUG FIX: The original check used case-sensitive startsWith(), so "HTTPS://..." was
+            // incorrectly treated as having no scheme, prepending "http://" and producing garbage.
+            // Fix: check case-insensitively, then normalize the scheme to lowercase.
+            val urlLower = url.lowercase()
+            url = when {
+                urlLower.startsWith("https://") ->
+                    "https://" + url.substring(url.indexOf("://") + 3)
+                urlLower.startsWith("http://") ->
+                    "http://" + url.substring(url.indexOf("://") + 3)
+                else -> "http://$url"
             }
 
             val uri = URI(url)

@@ -74,36 +74,77 @@ class CsvThreatFeedIngestionService(
         }
     }
 
+    suspend fun processContentIfNeeded(filename: String, content: String) {
+        val contentBytes = content.toByteArray(StandardCharsets.UTF_8)
+        val currentSize = contentBytes.size.toLong()
+        val currentModified = Instant.now()
+        val checksum = calculateStringChecksum(contentBytes)
+
+        val metadata = metadataRepository.findById(filename).orElse(null)
+
+        if (metadata != null && metadata.checksum == checksum && metadata.fileSize == currentSize) {
+            log.info("Skipping $filename - unchanged since last ingestion.")
+            return
+        }
+
+        log.info("Starting ingestion for $filename from memory")
+
+        try {
+            content.reader().buffered().useLines { lines ->
+                ingestLinesSequence(lines, filename)
+            }
+            
+            val newMetadata = IngestionMetadata(
+                filename = filename,
+                checksum = checksum,
+                fileSize = currentSize,
+                lastModified = currentModified,
+                ingestedAt = Instant.now()
+            )
+            metadataRepository.save(newMetadata)
+            log.info("Finished ingestion for $filename from memory")
+        } catch (e: Exception) {
+            log.error("Error during ingestion of $filename", e)
+        }
+    }
+
     private suspend fun ingestFile(file: File) = withContext(Dispatchers.IO) {
-        val filename = file.name
+        file.inputStream().bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
+            ingestLinesSequence(lines, file.name)
+        }
+    }
+
+    private suspend fun ingestLinesSequence(lines: Sequence<String>, filename: String) = withContext(Dispatchers.IO) {
         var urlIndex = -1
         var labelIndex = -1
         
         var isHeaderProcessed = false
 
-        file.inputStream().bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
-            val flow = lines.asFlow()
+        val flow = lines.asFlow()
 
-            flow.chunked(batchSize).collect { chunk ->
-                if (!isHeaderProcessed) {
-                    val header = chunk.first()
-                    val cols = header.split(",")
-                    urlIndex = cols.indexOfFirst { it.equals("url", ignoreCase = true) }
-                    labelIndex = cols.indexOfFirst { it.equals("label", ignoreCase = true) || it.equals("type", ignoreCase = true) }
-                    
-                    if (urlIndex == -1) {
-                        // fallback auto-detect based on data if header is missing
-                        if (header.contains("http") || header.contains(".")) {
-                            urlIndex = 0 // Assume first column is URL
-                        }
+        flow.chunked(batchSize).collect { chunk ->
+            if (!isHeaderProcessed) {
+                val header = chunk.first()
+                val cols = header.split(",")
+                urlIndex = cols.indexOfFirst { it.equals("url", ignoreCase = true) }
+                labelIndex = cols.indexOfFirst { it.equals("label", ignoreCase = true) || it.equals("type", ignoreCase = true) }
+                
+                if (urlIndex == -1) {
+                    // fallback auto-detect based on data if header is missing
+                    if (header.contains("http") || header.contains(".")) {
+                        urlIndex = 0 // Assume first column is URL
                     }
-
-                    isHeaderProcessed = true
-                    // Process chunk without header
-                    processChunk(chunk.drop(1), filename, urlIndex, labelIndex)
-                } else {
-                    processChunk(chunk, filename, urlIndex, labelIndex)
                 }
+
+                if (urlIndex == -1) {
+                    throw IllegalArgumentException("Could not detect URL/Domain column in $filename. Skipping file to prevent data corruption.")
+                }
+
+                isHeaderProcessed = true
+                // Process chunk without header
+                processChunk(chunk.drop(1), filename, urlIndex, labelIndex)
+            } else {
+                processChunk(chunk, filename, urlIndex, labelIndex)
             }
         }
     }
@@ -171,6 +212,12 @@ class CsvThreatFeedIngestionService(
             }
         }
         val bytes = digest.digest()
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun calculateStringChecksum(contentBytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(contentBytes)
         return bytes.joinToString("") { "%02x".format(it) }
     }
 

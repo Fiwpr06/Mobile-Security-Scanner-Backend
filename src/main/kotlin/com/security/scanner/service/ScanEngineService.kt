@@ -39,7 +39,7 @@ class ScanEngineService(
      * FIX: @Transactional is now placed ONLY on saveScanResult(), which is the only method
      * that actually needs a DB transaction. This reduces connection hold time from ~10s to <10ms.
      */
-    suspend fun scanUrl(rawUrl: String, deviceId: String): ScanResponse {
+    suspend fun scanUrl(rawUrl: String, deviceId: String, userId: java.util.UUID? = null): ScanResponse {
         val startTime = System.currentTimeMillis()
 
         // 1. Canonicalization
@@ -81,7 +81,7 @@ class ScanEngineService(
         // 4. Smart Early Return
         if (offlineResult.fastReturn) {
             log.info("Fast Return triggered by Offline Intel for $canonicalUrl. Status: ${offlineResult.status}")
-            return buildOfflineResponse(canonicalUrl, urlHash, offlineResult, startTime, deviceId)
+            return buildOfflineResponse(canonicalUrl, urlHash, offlineResult, startTime, deviceId, userId)
         }
 
         // 5. External API Scanning & Local Analyzers
@@ -102,7 +102,7 @@ class ScanEngineService(
                 log.info("Fast Return: Google Safe Browsing flagged $canonicalUrl as malicious. Bypassing other external APIs.")
                 val scanTimeMs = System.currentTimeMillis() - startTime
                 val aggregated = aggregateResults(canonicalUrl, results, sslResult, heuristicResult, offlineResult, scanTimeMs)
-                saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results)
+                saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results, userId)
                 return aggregated.copy(scanTimeMs = scanTimeMs)
             }
 
@@ -130,7 +130,7 @@ class ScanEngineService(
         val scanTimeMs = System.currentTimeMillis() - startTime
         val aggregated = aggregateResults(canonicalUrl, results, sslResult, heuristicResult, offlineResult, scanTimeMs)
 
-        saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results)
+        saveScanResult(aggregated, deviceId, urlHash, scanTimeMs, results, userId)
         log.info("Scan completed url=$canonicalUrl status=${aggregated.status} score=${aggregated.riskScore} time=${scanTimeMs}ms")
 
         return aggregated.copy(scanTimeMs = scanTimeMs)
@@ -282,7 +282,8 @@ class ScanEngineService(
         urlHash: String, 
         offlineResult: OfflineScanResult, 
         startTime: Long, 
-        deviceId: String
+        deviceId: String,
+        userId: java.util.UUID? = null
     ): ScanResponse {
         val scanTimeMs = System.currentTimeMillis() - startTime
         val riskScore = (offlineResult.confidenceScore * 100).toInt()
@@ -295,7 +296,7 @@ class ScanEngineService(
             scanTimeMs = scanTimeMs
         )
 
-        saveScanResult(response, deviceId, urlHash, scanTimeMs, emptyMap())
+        saveScanResult(response, deviceId, urlHash, scanTimeMs, emptyMap(), userId)
         return response
     }
 
@@ -318,7 +319,8 @@ class ScanEngineService(
         deviceId: String,
         urlHash: String,
         scanTimeMs: Long,
-        results: Map<String, ThreatAnalysisResult>
+        results: Map<String, ThreatAnalysisResult>,
+        userId: java.util.UUID? = null
     ): ScanResult {
         val google = results[googleSafeBrowsingClient.sourceName]?.rawData as? GoogleSafeBrowsingResult
         val vt = results[virusTotalClient.sourceName]?.rawData as? VirusTotalResult
@@ -328,6 +330,7 @@ class ScanEngineService(
             url = response.url,
             urlHash = urlHash,
             deviceId = deviceId,
+            userId = userId,
             riskScore = response.riskScore,
             status = response.status,
             googleSafeBrowsingFlagged = google?.flagged,
@@ -383,4 +386,14 @@ class ScanEngineService(
         isCached = isCached,
         scannedAt = this.scannedAt.toString()
     )
+
+    suspend fun getUserScans(userId: java.util.UUID, page: Int = 0, size: Int = 20): org.springframework.data.domain.Page<ScanResponse> {
+        val results = scanRepositoryAdapter.findRecentScansByUserId(userId, page, size)
+        return results.map { it.toResponse(isCached = true) }
+    }
+
+    suspend fun getDeviceScans(deviceId: String, page: Int = 0, size: Int = 20): org.springframework.data.domain.Page<ScanResponse> {
+        val results = scanRepositoryAdapter.findRecentScansByDeviceId(deviceId, page, size)
+        return results.map { it.toResponse(isCached = true) }
+    }
 }
