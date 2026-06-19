@@ -1,6 +1,6 @@
 # =============================================
 # Multi-stage Production Dockerfile
-# Mobile Security Scanner Backend
+# SafeSurf Backend
 # =============================================
 
 # Stage 1: Build
