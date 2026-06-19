@@ -57,7 +57,19 @@ data class AuthResponse(
     val accessToken: String,
     val tokenType: String = "Bearer",
     val expiresIn: Long,
-    val deviceId: String
+    val deviceId: String,
+    val userId: String? = null,
+    val username: String? = null
+)
+
+@Schema(description = "User authentication request")
+data class AuthRequest(
+    @field:NotBlank(message = "Username is required")
+    val username: String,
+    @field:NotBlank(message = "Password is required")
+    val password: String,
+    
+    val deviceId: String? = null
 )
 
 @Schema(description = "URL scan result")

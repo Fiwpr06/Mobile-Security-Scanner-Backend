@@ -33,8 +33,12 @@ class ThreatIntelligenceController(
     )
     fun reportFalseNegative(
         @Valid @RequestBody request: FalseNegativeReportRequest,
-        @AuthenticationPrincipal deviceId: String
+        @AuthenticationPrincipal deviceId: String?
     ): ResponseEntity<SuccessResponse<ReportResponse>> {
+        // BUG FIX: Guard against null deviceId from failed JWT auth
+        if (deviceId == null) {
+            return ResponseEntity.status(401).build()
+        }
         val response = threatIntelligenceService.submitFalseNegativeReport(request, deviceId)
         return ResponseEntity.ok(SuccessResponse(data = response))
     }
@@ -65,10 +69,12 @@ class ThreatIntelligenceController(
     @GetMapping("/search")
     @Operation(summary = "Search threat URLs")
     fun searchThreats(
+        @RequestParam(defaultValue = "") query: String,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int
     ): ResponseEntity<SuccessResponse<ThreatListResponse>> {
         val response = threatIntelligenceService.searchThreats(
+            query = query.trim(),
             page = page.coerceAtLeast(0),
             size = size.coerceIn(1, 100)
         )

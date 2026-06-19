@@ -38,16 +38,21 @@ class ScanController(
     )
     suspend fun scanUrl(
         @Valid @RequestBody request: ScanRequest,
-        @AuthenticationPrincipal deviceId: String
+        httpServletRequest: jakarta.servlet.http.HttpServletRequest
     ): ResponseEntity<SuccessResponse<ScanResponse>> {
-        val normalizedUrl = normalizeUrl(request.url)
-        log.info("Scan request: url=$normalizedUrl device=$deviceId")
+        val deviceId = httpServletRequest.getAttribute("deviceId") as String?
+        val userIdStr = httpServletRequest.getAttribute("userId") as String?
+        val userId = userIdStr?.let { java.util.UUID.fromString(it) }
 
-        // NOTE: By using `suspend fun` in Spring MVC, the Tomcat worker thread is
-        // released back to the pool while the coroutine suspends during I/O.
-        // This is a highly pragmatic upgrade that prevents thread starvation without
-        // requiring a full WebFlux migration.
-        val result = scanEngineService.scanUrl(normalizedUrl, deviceId)
+        if (deviceId == null && userId == null) {
+            return ResponseEntity.status(401).build()
+        }
+        val actualDeviceId = deviceId ?: "web-user-$userId"
+
+        val normalizedUrl = normalizeUrl(request.url)
+        log.info("Scan request: url=$normalizedUrl device=$actualDeviceId user=$userId")
+
+        val result = scanEngineService.scanUrl(normalizedUrl, actualDeviceId, userId)
 
         return ResponseEntity.ok(
             SuccessResponse(
@@ -55,6 +60,30 @@ class ScanController(
                 requestId = RequestIdHolder.get()
             )
         )
+    }
+
+    @GetMapping("/me")
+    @Operation(summary = "Get user/device scans", description = "Get scan history for the logged in user or device")
+    suspend fun getUserScans(
+        httpServletRequest: jakarta.servlet.http.HttpServletRequest,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): ResponseEntity<SuccessResponse<org.springframework.data.domain.Page<ScanResponse>>> {
+        val userIdStr = httpServletRequest.getAttribute("userId") as String?
+        val deviceId = httpServletRequest.getAttribute("deviceId") as String?
+
+        if (userIdStr == null && deviceId == null) {
+            return ResponseEntity.status(401).build()
+        }
+
+        val scans = if (userIdStr != null) {
+            val userId = java.util.UUID.fromString(userIdStr)
+            scanEngineService.getUserScans(userId, page, size)
+        } else {
+            scanEngineService.getDeviceScans(deviceId!!, page, size)
+        }
+        
+        return ResponseEntity.ok(SuccessResponse(data = scans))
     }
 
     /**
