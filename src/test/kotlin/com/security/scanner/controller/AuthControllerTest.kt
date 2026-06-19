@@ -20,8 +20,11 @@ import com.security.scanner.security.JwtAuthenticationFilter
 import com.security.scanner.security.JwtService
 import com.security.scanner.security.RateLimitingFilter
 import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.test.context.TestPropertySource
 
 @WebMvcTest(AuthController::class)
+@TestPropertySource(properties = ["app.cors.allowed-origins=http://localhost:3000"])
+@Import(SecurityConfig::class)
 class AuthControllerTest {
 
     @Autowired private lateinit var mockMvc: MockMvc
@@ -32,6 +35,25 @@ class AuthControllerTest {
     @MockBean private lateinit var jwtAuthenticationFilter: JwtAuthenticationFilter
     @MockBean private lateinit var rateLimitingFilter: RateLimitingFilter
     @MockBean private lateinit var redisTemplate: RedisTemplate<String, String>
+
+    @org.junit.jupiter.api.BeforeEach
+    fun setUpFilters() {
+        org.mockito.kotlin.doAnswer { invocation ->
+            val req = invocation.getArgument<jakarta.servlet.ServletRequest>(0)
+            val res = invocation.getArgument<jakarta.servlet.ServletResponse>(1)
+            val chain = invocation.getArgument<jakarta.servlet.FilterChain>(2)
+            chain.doFilter(req, res)
+            null
+        }.whenever(jwtAuthenticationFilter).doFilter(org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any())
+
+        org.mockito.kotlin.doAnswer { invocation ->
+            val req = invocation.getArgument<jakarta.servlet.ServletRequest>(0)
+            val res = invocation.getArgument<jakarta.servlet.ServletResponse>(1)
+            val chain = invocation.getArgument<jakarta.servlet.FilterChain>(2)
+            chain.doFilter(req, res)
+            null
+        }.whenever(rateLimitingFilter).doFilter(org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.any())
+    }
 
     @Test
     fun `POST auth register should return JWT token`() {
