@@ -3,18 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Test Web interface for Security Scanner System">
     <title>Security Scanner Testing</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <style>
         :root {
             --bg-dark: #0f172a;
             --bg-card: rgba(30, 41, 59, 0.7);
             --primary: #3b82f6;
             --primary-hover: #2563eb;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
+            --success: #34d399;
+            --danger: #f87171;
+            --warning: #fbbf24;
             --text-main: #f8fafc;
-            --text-muted: #94a3b8;
+            --text-muted: #cbd5e1;
             --border: rgba(255, 255, 255, 0.1);
         }
 
@@ -160,6 +162,7 @@
         .status-safe { background-color: rgba(16, 185, 129, 0.2); color: var(--success); }
         .status-suspicious { background-color: rgba(245, 158, 11, 0.2); color: var(--warning); }
         .status-dangerous { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .status-unknown { background-color: rgba(100, 100, 100, 0.2); color: var(--text-muted); }
         
         /* Spinner */
         .loader {
@@ -184,30 +187,50 @@
         <!-- Auth Section -->
         <div class="card" id="authCard">
             <h2>1. Device Registration</h2>
-            <div class="form-group">
-                <label for="deviceId">Device ID (Min 8 chars)</label>
-                <input type="text" id="deviceId" value="test-web-device-001" placeholder="Enter device ID">
-            </div>
-            <button id="registerBtn" onclick="registerDevice()">
-                <div class="loader" id="registerLoader"></div>
-                Register & Get Token
-            </button>
+            <form id="registerForm" onsubmit="event.preventDefault(); registerDevice();">
+                <div class="form-group">
+                    <label for="deviceId">Device ID (Min 8 chars)</label>
+                    <input type="text" id="deviceId" value="test-web-device-001" placeholder="Enter device ID" aria-label="Device ID">
+                </div>
+                <button type="submit" id="registerBtn" aria-label="Register Device">
+                    <div class="loader" id="registerLoader" aria-hidden="true"></div>
+                    Register & Get Token
+                </button>
+            </form>
             <div id="tokenDisplay" class="token-display"></div>
-            <div id="authResult" class="result"></div>
+            <div id="authResult" class="result" aria-live="polite"></div>
         </div>
 
         <!-- Scan Section -->
         <div class="card" id="scanCard" style="opacity: 0.5; pointer-events: none;">
             <h2>2. URL Scanner</h2>
-            <div class="form-group">
-                <label for="urlToScan">URL to scan</label>
-                <input type="text" id="urlToScan" placeholder="https://example.com">
-            </div>
-            <button id="scanBtn" onclick="scanUrl()">
-                <div class="loader" id="scanLoader"></div>
-                Scan URL
-            </button>
-            <div id="scanResult" class="result"></div>
+            <form id="scanForm" onsubmit="event.preventDefault(); scanUrl();">
+                <div class="form-group">
+                    <label for="urlToScan">URL to scan</label>
+                    <input type="text" id="urlToScan" placeholder="https://example.com" aria-label="URL to Scan">
+                </div>
+                <button type="submit" id="scanBtn" aria-label="Scan URL">
+                    <div class="loader" id="scanLoader" aria-hidden="true"></div>
+                    Scan URL
+                </button>
+            </form>
+            <div id="scanResult" class="result" aria-live="polite"></div>
+        </div>
+
+        <!-- Search Section -->
+        <div class="card" id="searchCard" style="opacity: 0.5; pointer-events: none;">
+            <h2>3. Search Threats</h2>
+            <form id="searchForm" onsubmit="event.preventDefault(); searchThreats();">
+                <div class="form-group">
+                    <label for="searchQuery">Search Query (Optional)</label>
+                    <input type="text" id="searchQuery" placeholder="Search domain or URL" aria-label="Search Query">
+                </div>
+                <button type="submit" id="searchBtn" aria-label="Search Threats">
+                    <div class="loader" id="searchLoader" aria-hidden="true"></div>
+                    Search
+                </button>
+            </form>
+            <div id="searchResult" class="result" aria-live="polite"></div>
         </div>
     </div>
 
@@ -253,10 +276,14 @@
                     tokenDisplay.textContent = `Token Acquired: ${jwtToken.substring(0, 20)}...`;
                     resultDiv.style.borderColor = 'var(--success)';
                     
-                    // Enable Scan section
+                    // Enable Scan and Search section
                     const scanCard = document.getElementById('scanCard');
                     scanCard.style.opacity = '1';
                     scanCard.style.pointerEvents = 'auto';
+
+                    const searchCard = document.getElementById('searchCard');
+                    searchCard.style.opacity = '1';
+                    searchCard.style.pointerEvents = 'auto';
                 } else {
                     resultDiv.style.borderColor = 'var(--danger)';
                 }
@@ -320,15 +347,63 @@
             }
         }
 
+        async function searchThreats() {
+            if (!jwtToken) {
+                alert("Please register first to get a token");
+                return;
+            }
+
+            const query = document.getElementById('searchQuery').value;
+            const btn = document.getElementById('searchBtn');
+            const loader = document.getElementById('searchLoader');
+            const resultDiv = document.getElementById('searchResult');
+
+            btn.disabled = true;
+            loader.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/search?query=${encodeURIComponent(query)}&page=0&size=10`, {
+                    method: 'GET',
+                    headers: { 
+                        'Authorization': `Bearer ${jwtToken}`
+                    }
+                });
+
+                const data = await response.json();
+                
+                resultDiv.style.display = 'block';
+                if (response.ok && data.data) {
+                    if (data.data.threats.length === 0) {
+                        resultDiv.innerHTML = "<div>No threats found.</div>";
+                    } else {
+                        resultDiv.innerHTML = JSON.stringify(data.data, null, 2);
+                    }
+                    resultDiv.style.borderColor = 'var(--success)';
+                } else {
+                    resultDiv.textContent = JSON.stringify(data, null, 2);
+                    resultDiv.style.borderColor = 'var(--danger)';
+                }
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.borderColor = 'var(--danger)';
+                resultDiv.textContent = `Error: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+
         function formatScanResult(data) {
             if (!data.success || !data.data) {
                 return JSON.stringify(data, null, 2);
             }
 
             const scan = data.data;
-            const statusClass = scan.status.toLowerCase();
+            const status = scan.status || 'UNKNOWN';
+            const statusClass = status.toLowerCase();
             
-            let html = `<div class="status-badge status-${statusClass}">STATUS: ${scan.status}</div>\n`;
+            let html = `<div class="status-badge status-${statusClass}">STATUS: ${status}</div>\n`;
             html += `<b>Risk Score:</b> ${scan.riskScore}/100\n`;
             html += `<b>URL:</b> ${scan.url}\n\n`;
             html += `<b>Sources Data:</b>\n${JSON.stringify(scan.sources, null, 2)}`;
