@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.stereotype.Repository
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.Optional
 
@@ -15,14 +16,19 @@ interface MaliciousUrlRepository : JpaRepository<MaliciousUrl, String> {
     fun findByUrlHash(urlHash: String): Optional<MaliciousUrl>
     fun existsByUrlHash(urlHash: String): Boolean
 
-    @Query("SELECT m FROM MaliciousUrl m WHERE m.isDangerous = true ORDER BY m.confidenceScore DESC, m.detectionCount DESC")
+    @Query("SELECT m FROM MaliciousUrl m WHERE m.isDangerous = true")
     fun findTopThreats(pageable: Pageable): Page<MaliciousUrl>
 
+    @Query("SELECT m FROM MaliciousUrl m WHERE m.isDangerous = true AND (LOWER(m.url) LIKE LOWER(CONCAT('%', :query, '%')) OR LOWER(m.normalizedDomain) LIKE LOWER(CONCAT('%', :query, '%')))")
+    fun searchThreats(query: String, pageable: Pageable): Page<MaliciousUrl>
+
     @Modifying
+    @Transactional
     @Query("UPDATE MaliciousUrl m SET m.detectionCount = m.detectionCount + 1, m.lastDetectedAt = :now WHERE m.urlHash = :urlHash")
     fun incrementDetectionCount(urlHash: String, now: Instant)
 
     @Modifying
+    @Transactional
     @Query(value = """
         INSERT INTO malicious_urls (
             url_hash, url, normalized_domain, normalized_path, threat_category, 

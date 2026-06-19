@@ -34,4 +34,16 @@ class ScanRepositoryAdapter(
         withContext(Dispatchers.IO) {
             repository.save(entity)
         }
+
+    suspend fun findRecentScansByUserId(userId: java.util.UUID, page: Int, size: Int): org.springframework.data.domain.Page<ScanResult> =
+        withContext(Dispatchers.IO) {
+            val pageable = org.springframework.data.domain.PageRequest.of(page, size)
+            repository.findByUserIdOrderByScannedAtDesc(userId, pageable)
+        }
+
+    suspend fun findRecentScansByDeviceId(deviceId: String, page: Int, size: Int): org.springframework.data.domain.Page<ScanResult> =
+        withContext(Dispatchers.IO) {
+            val pageable = org.springframework.data.domain.PageRequest.of(page, size)
+            repository.findByDeviceIdOrderByScannedAtDesc(deviceId, pageable)
+        }
 }
