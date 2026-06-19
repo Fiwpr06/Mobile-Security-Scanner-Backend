@@ -1,37 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="mobile-security-scanner"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeContext>true</includeContext>
-            <customFields>{"app":"mobile-security-scanner","version":"1.0.0"}</customFields>
+            <customFields>{"app":"safesurf","version":"1.0.0"}</customFields>
         </encoder>
     </appender>
 
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/application.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <fileNamePattern>logs/application.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
-            <maxFileSize>100MB</maxFileSize>
             <maxHistory>30</maxHistory>
-            <totalSizeCap>3GB</totalSizeCap>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
         </rollingPolicy>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeContext>true</includeContext>
         </encoder>
     </appender>
 
-    <logger name="com.security.scanner" level="DEBUG" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-    </logger>
-
-    <logger name="org.springframework.security" level="WARN"/>
-    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="com.security.scanner" level="DEBUG" />
+    <logger name="org.springframework.security" level="WARN" />
 
     <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE" />
     </root>
+
 </configuration>
