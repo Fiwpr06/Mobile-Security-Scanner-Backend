@@ -10,8 +10,8 @@ import org.springframework.scheduling.annotation.EnableScheduling
 @EnableCaching
 @EnableAsync
 @EnableScheduling
-class MobileSecurityScannerApplication
+class SafeSurfApplication
 
 fun main(args: Array<String>) {
-    runApplication<MobileSecurityScannerApplication>(*args)
+    runApplication<SafeSurfApplication>(*args)
 }
