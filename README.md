@@ -1,4 +1,8 @@
-# 🔐 Mobile Security Scanner — Backend
+<div align="center">
+  <img src="assets/SafeSurf.png" alt="SafeSurf Logo" width="256" />
+</div>
+
+# 🔐 SafeSurf — Backend
 
 > **Production-Grade Kotlin/Spring Boot backend** for intelligent URL threat analysis.  
 > Integrates Google Safe Browsing, AbuseIPDB, VirusTotal, and Offline Threat Feeds  
@@ -62,7 +66,7 @@
 
 ```
 src/main/kotlin/com/security/scanner/
-├── MobileSecurityScannerApplication.kt
+├── SafeSurfApplication.kt
 ├── controller/          # REST API controllers (Presentation Layer)
 │   ├── AuthController.kt
 │   ├── ScanController.kt          # Suspend Controller (no runBlocking)
@@ -137,8 +141,8 @@ src/main/kotlin/com/security/scanner/
 ### 1. Clone & Configure
 
 ```bash
-git clone <repo-url> mobile-security-scanner
-cd mobile-security-scanner
+git clone <repo-url> safesurf
+cd safesurf
 
 # Create your .env file
 cp .env.example .env
