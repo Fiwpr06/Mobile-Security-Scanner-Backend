@@ -122,7 +122,7 @@ class GoogleSafeBrowsingClient(
     }
 
     private fun buildRequest(url: String): GoogleSafeBrowsingRequest = GoogleSafeBrowsingRequest(
-        client = ClientInfo(clientId = "mobile-security-scanner", clientVersion = "1.0.0"),
+        client = ClientInfo(clientId = "safesurf", clientVersion = "1.0.0"),
         threatInfo = ThreatInfo(
             threatTypes = listOf(
                 "MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE",

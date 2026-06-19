@@ -14,6 +14,9 @@ data class Device(
     @Column(name = "device_id", unique = true, nullable = false)
     val deviceId: String,
 
+    @Column(name = "user_id")
+    var userId: UUID? = null,
+
     @Column(name = "platform")
     val platform: String? = null,
 

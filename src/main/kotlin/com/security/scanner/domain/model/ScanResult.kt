@@ -24,6 +24,9 @@ data class ScanResult(
     @Column(name = "device_id", nullable = false)
     val deviceId: String,
 
+    @Column(name = "user_id")
+    var userId: UUID? = null,
+
     @Column(name = "risk_score", nullable = false)
     val riskScore: Int,
 
