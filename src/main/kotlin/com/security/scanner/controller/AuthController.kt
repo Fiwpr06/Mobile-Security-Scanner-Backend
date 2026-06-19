@@ -26,4 +26,28 @@ class AuthController(private val authService: AuthService) {
         val response = authService.registerDevice(request)
         return ResponseEntity.ok(SuccessResponse(data = response))
     }
+
+    @PostMapping("/user/register")
+    @Operation(
+        summary = "Register a user account",
+        description = "Register a new user account with username and password"
+    )
+    fun registerUser(
+        @Valid @RequestBody request: com.security.scanner.domain.dto.AuthRequest
+    ): ResponseEntity<SuccessResponse<AuthResponse>> {
+        val response = authService.registerUser(request)
+        return ResponseEntity.ok(SuccessResponse(data = response))
+    }
+
+    @PostMapping("/user/login")
+    @Operation(
+        summary = "Login user",
+        description = "Authenticate user with username and password"
+    )
+    fun loginUser(
+        @Valid @RequestBody request: com.security.scanner.domain.dto.AuthRequest
+    ): ResponseEntity<SuccessResponse<AuthResponse>> {
+        val response = authService.loginUser(request)
+        return ResponseEntity.ok(SuccessResponse(data = response))
+    }
 }

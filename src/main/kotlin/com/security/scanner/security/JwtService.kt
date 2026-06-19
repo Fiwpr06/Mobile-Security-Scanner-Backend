@@ -22,10 +22,16 @@ class JwtService(
         Keys.hmacShaKeyFor(keyBytes)
     }
 
-    fun generateToken(deviceId: String): String {
-        return Jwts.builder()
+    fun generateToken(deviceId: String, userId: String? = null): String {
+        val builder = Jwts.builder()
             .subject(deviceId)
             .claim("type", "access")
+
+        if (userId != null) {
+            builder.claim("userId", userId)
+        }
+
+        return builder
             .issuedAt(Date())
             .expiration(Date(System.currentTimeMillis() + accessTokenExpiration))
             .signWith(signingKey)
@@ -38,6 +44,15 @@ class JwtService(
             claims.subject
         } catch (e: Exception) {
             log.warn("Failed to extract device ID from token: ${e.message}")
+            null
+        }
+    }
+
+    fun extractUserId(token: String): String? {
+        return try {
+            val claims = parseClaims(token)
+            claims.get("userId", String::class.java)
+        } catch (e: Exception) {
             null
         }
     }

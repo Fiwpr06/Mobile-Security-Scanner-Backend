@@ -34,16 +34,26 @@ class JwtAuthenticationFilter(
         try {
             if (jwtService.isTokenValid(token)) {
                 val deviceId = jwtService.extractDeviceId(token)
-                if (deviceId != null) {
-                    val auth = UsernamePasswordAuthenticationToken(
-                        deviceId,
-                        null,
+                val userId = jwtService.extractUserId(token)
+                
+                if (deviceId != null || userId != null) {
+                    val principal = userId ?: deviceId
+                    val authorities = if (userId != null) {
+                        listOf(SimpleGrantedAuthority("ROLE_USER"))
+                    } else {
                         listOf(SimpleGrantedAuthority("ROLE_DEVICE"))
+                    }
+                    
+                    val auth = UsernamePasswordAuthenticationToken(
+                        principal,
+                        null,
+                        authorities
                     )
                     auth.details = request.remoteAddr
                     SecurityContextHolder.getContext().authentication = auth
-                    // Pass device_id to request for logging
-                    request.setAttribute("deviceId", deviceId)
+                    
+                    if (deviceId != null) request.setAttribute("deviceId", deviceId)
+                    if (userId != null) request.setAttribute("userId", userId)
                 }
             }
         } catch (e: Exception) {
@@ -52,5 +62,9 @@ class JwtAuthenticationFilter(
         }
 
         filterChain.doFilter(request, response)
+    }
+
+    override fun shouldNotFilterAsyncDispatch(): Boolean {
+        return false
     }
 }
