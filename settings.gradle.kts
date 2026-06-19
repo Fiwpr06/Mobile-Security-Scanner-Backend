@@ -1,1 +1,1 @@
-rootProject.name = "mobile-security-scanner"
+rootProject.name = "safesurf"

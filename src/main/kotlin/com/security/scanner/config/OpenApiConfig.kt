@@ -19,10 +19,10 @@ class OpenApiConfig {
         return OpenAPI()
             .info(
                 Info()
-                    .title("Mobile Security Scanner API")
+                    .title("SafeSurf API")
                     .description(
                         """
-                        Backend API for Mobile Security Scanner - An intelligent URL threat analysis system
+                        Backend API for SafeSurf - An intelligent URL threat analysis system
                         powered by multiple threat intelligence sources including Google Safe Browsing,
                         VirusTotal, and AbuseIPDB.
                         

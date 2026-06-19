@@ -1,6 +1,6 @@
 -- =============================================
 -- V1__initial_schema.sql
--- Initial database schema for Mobile Security Scanner
+-- Initial database schema for SafeSurf
 -- =============================================
 
 -- Devices table for device-based authentication

@@ -47,6 +47,13 @@ class SecurityConfig(
                     .requestMatchers(*PUBLIC_ENDPOINTS).permitAll()
                     .anyRequest().authenticated()
             }
+            .exceptionHandling { exceptions ->
+                exceptions.authenticationEntryPoint { _, response, _ ->
+                    response.status = jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED
+                    response.contentType = "application/json"
+                    response.writer.write("""{"error":"UNAUTHORIZED","message":"Authentication required","statusCode":401}""")
+                }
+            }
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterAfter(rateLimitingFilter, JwtAuthenticationFilter::class.java)
             .headers { headers ->
