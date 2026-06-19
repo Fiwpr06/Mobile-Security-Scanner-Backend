@@ -60,7 +60,7 @@ class SecurityConfig(
                 headers
                     .frameOptions { it.deny() }
                     .xssProtection { }
-                    .contentSecurityPolicy { it.policyDirectives("default-src 'self'") }
+                    .contentSecurityPolicy { it.policyDirectives("default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.cloudflareinsights.com data:; img-src 'self' data: validator.swagger.io;") }
                     .referrerPolicy { it.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }
                     .permissionsPolicy { it.policy("camera=(), microphone=(), geolocation=()") }
             }
