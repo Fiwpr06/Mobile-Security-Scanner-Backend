@@ -14,6 +14,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.cache.annotation.Cacheable
 
 @Service
 class ThreatIntelligenceService(
@@ -24,6 +25,7 @@ class ThreatIntelligenceService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    @Cacheable("topThreats")
     fun getTopThreats(page: Int, pageSize: Int): ThreatListResponse {
         val pageable = PageRequest.of(page, pageSize)
         val result = maliciousUrlRepository.findTopThreats(pageable)
@@ -80,6 +82,7 @@ class ThreatIntelligenceService(
      * Returns high-level threat intelligence statistics.
      * Moved here from ThreatIntelligenceController as part of the Layered Architecture fix.
      */
+    @Cacheable("stats")
     fun getStats(): Map<String, Any> {
         val today = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.DAYS)
         return mapOf(
