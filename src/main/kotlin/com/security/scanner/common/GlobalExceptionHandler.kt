@@ -14,6 +14,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import org.springframework.web.servlet.NoHandlerFoundException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 import java.time.Instant
 
 @RestControllerAdvice
@@ -72,6 +74,14 @@ class GlobalExceptionHandler {
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
         return buildError(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", ex.message ?: "Invalid argument", request)
+    }
+
+    @ExceptionHandler(NoHandlerFoundException::class, NoResourceFoundException::class)
+    fun handleNotFoundException(
+        ex: Exception,
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> {
+        return buildError(HttpStatus.NOT_FOUND, "NOT_FOUND", "Resource not found", request)
     }
 
     @ExceptionHandler(Exception::class)
